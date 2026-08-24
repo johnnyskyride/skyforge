@@ -33,6 +33,8 @@ then Live → Settings → Plug-Ins → enable VST3 system folders → **Rescan*
 
 The Live plugin window is the same SkyForge as the HTML and the app — Forge and Rack skins, knobs, keys, Call, trim glow. Kind = Free uses the knobs. Earth / Water / Fire / Wind load that dragon character. Volume, Halloween, and Aether still layer on top.
 
+**Ear Wyrm:** press Ear Wyrm, play, press Stop, wait for Cut…. The take is the native instrument. Replace vst3-5 (and earlier) with the latest zip, then rescan — older Live builds ignore the wyrm.
+
 The HTML file and the desktop app stay. This plugin is the Live twin of the same instrument.
 
 Halloween knobs the haunt. SF-33.

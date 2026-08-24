@@ -51,9 +51,11 @@ jobs:
           body: |
             SkyForge for Ableton Live — native instrument (VST3).
 
-            **This build puts the real SkyForge face in Live** — the same chassis as the HTML file and the desktop app, **Forge and Rack skins**, Trim lining, Kind, Call, keys, Halloween / Waters / Aether knobs.
+            **This is the real SkyForge face in Live** — same chassis as the HTML file and the desktop app, **Forge and Rack skins**, Trim lining, Kind, Call, keys, Halloween / Waters / Aether.
 
-            Sound is native (bounce and freeze work). The window is the SkyForge face, not a generic host panel.
+            Sound is native (bounce and freeze work).
+
+            **Ear Wyrm works in Live now.** Press **Ear Wyrm**, play, press **Stop**, wait for **Cut…**. The take is the native instrument, then the clip is cut on the face. Play at least a beat — a tap with no notes will not cut a wyrm.
 
             Put SkyForge on a **MIDI track**. Arm the track. Play.
 
@@ -63,7 +65,7 @@ jobs:
 
             **Mac:** unzip into `~/Library/Audio/Plug-Ins/VST3/` then rescan.
 
-            Replace any older SkyForge VST (vst3-3 and earlier) with this one, then rescan.
+            Replace any older SkyForge VST (vst3-5 and earlier) with this one, then rescan.
 
             Kind = Free uses the knobs. Earth / Water / Fire / Wind load that dragon character (Volume / Halloween / Aether still layer on top).
 
