@@ -1,0 +1,64 @@
+name: SkyForge VST3
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  vst3:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+          - os: macos-latest
+          - os: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build plugin
+        working-directory: plugin
+        run: cargo build --release --locked
+      - name: Bundle VST3
+        working-directory: plugin
+        run: python bundle.py
+      - name: Zip bundle
+        shell: bash
+        working-directory: plugin/dist
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a -tzip SkyForge-windows.vst3.zip SkyForge.vst3
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            zip -r SkyForge-mac.vst3.zip SkyForge.vst3
+          else
+            zip -r SkyForge-linux.vst3.zip SkyForge.vst3
+          fi
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('vst3-{0}', github.run_number) }}
+          name: SkyForge VST3 ${{ github.ref_type == 'tag' && github.ref_name || format('build {0}', github.run_number) }}
+          body: |
+            SkyForge for Ableton Live — native instrument (VST3).
+
+            Same voice as the SkyForge app: waves, filter, ADSR, unison, Kind (Earth/Water/Fire/Wind), Halloween, Waters, Aether, limiter.
+
+            Put SkyForge on a **MIDI track**. Arm the track. Play.
+
+            **Windows:** unzip `SkyForge-windows.vst3.zip` into
+            `C:\Program Files\Common Files\VST3\`
+            then Live → Settings → Plug-Ins → enable VST3 system folders → **Rescan**.
+
+            **Mac:** unzip into `~/Library/Audio/Plug-Ins/VST3/` then rescan.
+
+            Kind = Free uses the knobs. Earth / Water / Fire / Wind load that dragon character (knobs for Volume / Halloween / Aether still layer on top).
+
+            The HTML file and the desktop app stay as they are. This is the Live twin.
+          files: plugin/dist/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

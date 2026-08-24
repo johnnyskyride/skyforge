@@ -1,0 +1,19 @@
+[package]
+name = "skyforge_vst"
+version = "2.0.0"
+edition = "2021"
+authors = ["johnnyskyride"]
+description = "SkyForge analog instrument — VST3 / CLAP"
+license = "MIT"
+
+[lib]
+name = "skyforge_vst"
+crate-type = ["cdylib"]
+
+[dependencies]
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

@@ -20,10 +20,19 @@ That is the install-once, patch-forever path.
 
 Download **SkyForge.html**. Open it in any browser, even with wifi off. Send that file to anyone.
 
-## Ableton
+## Ableton Live (VST3)
 
-SkyForge is not a VST. Arm, play, **Bounce** a WAV (or MIDI) and drop it on a track.
+SkyForge is a native instrument. Put it on a MIDI track, arm, play.
 
-Halloween knobs the haunt. Presets: Init, Bass, Lead, Pad, Pluck, Keys, Haunt.
+Grab the VST3 for your machine from [Releases](https://github.com/johnnyskyride/skyforge/releases) (`SkyForge-windows.vst3.zip` / `SkyForge-mac.vst3.zip`).
 
-SF-33.
+**Windows:** unzip into `C:\Program Files\Common Files\VST3\`  
+then Live → Settings → Plug-Ins → enable VST3 system folders → **Rescan**.
+
+**Mac:** unzip into `~/Library/Audio/Plug-Ins/VST3/` then rescan.
+
+Kind = Free uses the knobs. Earth / Water / Fire / Wind load that dragon character. Volume, Halloween, and Aether still layer on top.
+
+The HTML file and the desktop app stay. This plugin is the Live twin of the same instrument.
+
+Halloween knobs the haunt. SF-33.
