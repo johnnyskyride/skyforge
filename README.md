@@ -31,7 +31,7 @@ then Live → Settings → Plug-Ins → enable VST3 system folders → **Rescan*
 
 **Mac:** unzip into `~/Library/Audio/Plug-Ins/VST3/` then rescan.
 
-Opens as the SkyForge face inside Live’s plugin window — tight chassis, trim glow on the Ableton purple around it. Kind = Free uses the knobs. Earth / Water / Fire / Wind load that dragon character. Volume, Halloween, and Aether still layer on top.
+The Live plugin window is the same SkyForge as the HTML and the app — Forge and Rack skins, knobs, keys, Call, trim glow. Kind = Free uses the knobs. Earth / Water / Fire / Wind load that dragon character. Volume, Halloween, and Aether still layer on top.
 
 The HTML file and the desktop app stay. This plugin is the Live twin of the same instrument.
 

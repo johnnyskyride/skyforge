@@ -50,8 +50,6 @@ pub(crate) enum Kind {
 
 #[derive(Params)]
 pub(crate) struct SkyForgeParams {
-    #[persist = "editor-state"]
-    pub editor_state: Arc<nih_plug_egui::EguiState>,
     #[id = "kind"]
     pub kind: EnumParam<Kind>,
     #[id = "wave"]
@@ -89,7 +87,6 @@ pub(crate) struct SkyForgeParams {
 impl Default for SkyForgeParams {
     fn default() -> Self {
         Self {
-            editor_state: nih_plug_egui::EguiState::from_size(editor::FACE_W, editor::FACE_H),
             kind: EnumParam::new("Kind", Kind::Free),
             wave: EnumParam::new("Wave", WaveKind::Saw),
             pulse_width: FloatParam::new("Width", 0.25, FloatRange::Linear { min: 0.05, max: 0.5 })
