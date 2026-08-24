@@ -59,6 +59,7 @@ pub(crate) struct FaceState {
     pub handle: String,
     pub kind: String,
     pub preset: String,
+    pub rec: String,
 }
 
 impl Default for FaceState {
@@ -69,6 +70,7 @@ impl Default for FaceState {
             handle: String::new(),
             kind: "free".to_string(),
             preset: "init".to_string(),
+            rec: String::new(),
         }
     }
 }
@@ -186,6 +188,7 @@ pub(crate) struct ClipDump {
     pub pcm: Vec<i16>,
     pub sent: usize,
     pub begun: bool,
+    pub mode: String,
 }
 
 pub(crate) struct FaceBus {
@@ -197,7 +200,10 @@ pub(crate) struct FaceBus {
     pub clip_on: AtomicBool,
     pub clip_sr: AtomicU32,
     pub clip: Mutex<Vec<f32>>,
+    pub clip_mode: Mutex<String>,
     pub dump: Mutex<Option<ClipDump>>,
+    pub midi: Mutex<Vec<(f32, u8, bool, f32)>>,
+    pub midi_t: AtomicU32,
 }
 
 impl FaceBus {
@@ -211,7 +217,10 @@ impl FaceBus {
             clip_on: AtomicBool::new(false),
             clip_sr: AtomicU32::new(44_100),
             clip: Mutex::new(Vec::new()),
+            clip_mode: Mutex::new(String::new()),
             dump: Mutex::new(None),
+            midi: Mutex::new(Vec::with_capacity(256)),
+            midi_t: AtomicU32::new(0),
         })
     }
 }
@@ -662,6 +671,7 @@ impl SkyForge {
         v.age = self.age;
         v.filter = Biquad::silent();
         self.age += 1;
+        self.tap_midi(note, true, vel);
     }
 
     fn note_off(&mut self, note: u8) {
@@ -669,6 +679,19 @@ impl SkyForge {
             if v.active && v.note == note && !matches!(v.stage, EnvStage::Release | EnvStage::Off) {
                 v.stage = EnvStage::Release;
             }
+        }
+        self.tap_midi(note, false, 0.0);
+    }
+
+    fn tap_midi(&self, note: u8, on: bool, vel: f32) {
+        let sr = self.sr.max(1.0);
+        let t = self.bus.midi_t.load(Ordering::Relaxed) as f32 / sr;
+        if let Ok(mut log) = self.bus.midi.try_lock() {
+            if log.len() >= 8192 {
+                let drop_n = log.len() - 8191;
+                log.drain(0..drop_n);
+            }
+            log.push((t, note, on, vel));
         }
     }
 
@@ -982,6 +1005,7 @@ impl Plugin for SkyForge {
         let old = f32::from_bits(self.bus.rms.load(Ordering::Relaxed));
         let rms = (old * 0.88 + peak * 0.22).clamp(0.0, 1.0);
         self.bus.rms.store(rms.to_bits(), Ordering::Relaxed);
+        self.bus.midi_t.fetch_add(len as u32, Ordering::Relaxed);
         if rec {
             if let Ok(mut buf) = self.bus.clip.try_lock() {
                 let max = (30.0 * sr) as usize;

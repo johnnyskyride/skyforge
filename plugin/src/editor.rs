@@ -24,8 +24,9 @@ enum Action {
     },
     NoteOn { note: u8, vel: Option<f32> },
     NoteOff { note: u8 },
-    ClipStart,
+    ClipStart { mode: Option<String> },
     ClipStop,
+    MidiDump,
 }
 
 #[derive(Deserialize)]
@@ -249,6 +250,7 @@ fn snapshot(params: &SkyForgeParams) -> serde_json::Value {
         "handle": face.handle,
         "kind": face.kind,
         "preset": face.preset,
+        "rec": face.rec,
     })
 }
 
@@ -280,7 +282,7 @@ fn b64(data: &[u8]) -> String {
     out
 }
 
-fn clip_start(bus: &crate::FaceBus) {
+fn clip_start(bus: &crate::FaceBus, mode: &str) {
     bus.clip_on.store(false, Ordering::Relaxed);
     if let Ok(mut dump) = bus.dump.lock() {
         *dump = None;
@@ -289,11 +291,19 @@ fn clip_start(bus: &crate::FaceBus) {
         buf.clear();
         buf.reserve(48_000 * 30);
     }
+    if let Ok(mut m) = bus.clip_mode.lock() {
+        *m = mode.to_string();
+    }
     bus.clip_on.store(true, Ordering::Relaxed);
 }
 
 fn clip_stop(bus: &crate::FaceBus) {
     bus.clip_on.store(false, Ordering::Relaxed);
+    let mode = bus
+        .clip_mode
+        .lock()
+        .map(|mut m| std::mem::take(&mut *m))
+        .unwrap_or_else(|_| "wyrm".to_string());
     let samples = bus
         .clip
         .lock()
@@ -310,6 +320,7 @@ fn clip_stop(bus: &crate::FaceBus) {
             pcm,
             sent: 0,
             begun: false,
+            mode: if mode.is_empty() { "wyrm".to_string() } else { mode },
         });
     }
 }
@@ -327,6 +338,7 @@ fn pump_clip(ctx: &nih_plug_webview::WindowHandler, bus: &crate::FaceBus) -> boo
             "phase": "begin",
             "sr": dump.sr,
             "n": dump.pcm.len(),
+            "mode": dump.mode,
         }));
         dump.begun = true;
         return true;
@@ -349,6 +361,26 @@ fn pump_clip(ctx: &nih_plug_webview::WindowHandler, bus: &crate::FaceBus) -> boo
     let _ = ctx.send_json(json!({ "type": "clip", "phase": "end" }));
     *slot = None;
     true
+}
+
+fn pump_midi(ctx: &nih_plug_webview::WindowHandler, bus: &crate::FaceBus) {
+    let events = bus
+        .midi
+        .lock()
+        .map(|log| {
+            log.iter()
+                .map(|(t, note, on, vel)| {
+                    json!({
+                        "t": t,
+                        "type": if *on { "on" } else { "off" },
+                        "midi": note,
+                        "vel": vel,
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let _ = ctx.send_json(json!({ "type": "midi", "events": events }));
 }
 
 pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<crate::FaceBus>) -> Option<Box<dyn Editor>> {
@@ -382,8 +414,23 @@ pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<crate::FaceBus>) -> Op
                             q.push((note, false, 0.0));
                         }
                     }
-                    Ok(Action::ClipStart) => clip_start(&bus),
-                    Ok(Action::ClipStop) => clip_stop(&bus),
+                    Ok(Action::ClipStart { mode }) => {
+                        let mode = match mode.as_deref() {
+                            Some("bounce") => "bounce",
+                            _ => "wyrm",
+                        };
+                        if let Ok(mut face) = params.face.lock() {
+                            face.rec = mode.to_string();
+                        }
+                        clip_start(&bus, mode);
+                    }
+                    Ok(Action::ClipStop) => {
+                        if let Ok(mut face) = params.face.lock() {
+                            face.rec.clear();
+                        }
+                        clip_stop(&bus);
+                    }
+                    Ok(Action::MidiDump) => pump_midi(ctx, &bus),
                     Err(_) => {}
                 }
             }

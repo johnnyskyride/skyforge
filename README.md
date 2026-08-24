@@ -35,7 +35,7 @@ The Live plugin window is the same SkyForge as the HTML and the app — Forge an
 
 Hide or fold the window — the instrument stays. Knobs, Kind, Rack, trim, and your take come back when you open it again.
 
-**Ear Wyrm:** press Ear Wyrm, play, press Stop, wait for Cut…. The take is the native instrument. Replace older Live builds with the latest zip, then rescan.
+**Ear Wyrm:** press Ear Wyrm, play, press Stop, wait for Cut…. The take is the native instrument. **Bounce** writes a WAV of that take. **MIDI** dumps the notes. Replace older Live builds with the latest zip, then rescan.
 
 The HTML file and the desktop app stay. This plugin is the Live twin of the same instrument.
 
