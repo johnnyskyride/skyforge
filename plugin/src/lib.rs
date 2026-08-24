@@ -715,13 +715,17 @@ impl Plugin for SkyForge {
             }
         }
 
-        if let Ok(mut q) = self.bus.inbox.lock() {
-            for (note, on, vel) in q.drain(..) {
-                if on {
-                    self.note_on(note, vel);
-                } else {
-                    self.note_off(note);
-                }
+        let incoming: Vec<(u8, bool, f32)> = self
+            .bus
+            .inbox
+            .lock()
+            .map(|mut q| q.drain(..).collect())
+            .unwrap_or_default();
+        for (note, on, vel) in incoming {
+            if on {
+                self.note_on(note, vel);
+            } else {
+                self.note_off(note);
             }
         }
 

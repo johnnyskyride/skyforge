@@ -151,7 +151,7 @@ fn paint_face(
     // header
     let led_r = Rect::from_min_size(Pos2::new(x, y + 4.0), Vec2::new(22.0, 22.0));
     ui.painter().circle_filled(led_r.center(), 8.0, Color32::from_rgb(0x3a, 0x2a, 0x18));
-    ui.painter().circle_filled(led_r.center(), 5.5, Color32::from_rgb(0xe8, 0xc05a));
+    ui.painter().circle_filled(led_r.center(), 5.5, Color32::from_rgb(0xe8, 0xc0, 0x5a));
     ui.painter().text(
         Pos2::new(x + 30.0, y + 4.0),
         egui::Align2::LEFT_TOP,
