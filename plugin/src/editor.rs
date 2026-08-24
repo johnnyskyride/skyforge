@@ -1,4 +1,4 @@
-use crate::{FaceBus, FilterKind, SkyForgeParams, WaveKind};
+use crate::{ClipDump, FaceBus, FilterKind, SkyForgeParams, WaveKind};
 use nih_plug::prelude::*;
 use nih_plug_webview::{HTMLSource, Key, WebViewEditor};
 use serde::Deserialize;
@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 pub const FACE_W: u32 = 1100;
 pub const FACE_H: u32 = 760;
+const CLIP_CHUNK: usize = 24_576;
 
 #[derive(Deserialize)]
 #[serde(tag = "type")]
@@ -16,6 +17,8 @@ enum Action {
     Patch { params: JsParams },
     NoteOn { note: u8, vel: Option<f32> },
     NoteOff { note: u8 },
+    ClipStart,
+    ClipStop,
 }
 
 #[derive(Deserialize)]
@@ -122,6 +125,105 @@ fn apply_patch(setter: &ParamSetter, params: &SkyForgeParams, patch: JsParams) {
     }
 }
 
+fn b64(data: &[u8]) -> String {
+    const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    let mut i = 0;
+    while i + 3 <= data.len() {
+        let n = ((data[i] as u32) << 16) | ((data[i + 1] as u32) << 8) | (data[i + 2] as u32);
+        out.push(T[(n >> 18) as usize] as char);
+        out.push(T[((n >> 12) & 63) as usize] as char);
+        out.push(T[((n >> 6) & 63) as usize] as char);
+        out.push(T[(n & 63) as usize] as char);
+        i += 3;
+    }
+    if i + 1 == data.len() {
+        let n = (data[i] as u32) << 16;
+        out.push(T[(n >> 18) as usize] as char);
+        out.push(T[((n >> 12) & 63) as usize] as char);
+        out.push('=');
+        out.push('=');
+    } else if i + 2 == data.len() {
+        let n = ((data[i] as u32) << 16) | ((data[i + 1] as u32) << 8);
+        out.push(T[(n >> 18) as usize] as char);
+        out.push(T[((n >> 12) & 63) as usize] as char);
+        out.push(T[((n >> 6) & 63) as usize] as char);
+        out.push('=');
+    }
+    out
+}
+
+fn clip_start(bus: &FaceBus) {
+    bus.clip_on.store(false, Ordering::Relaxed);
+    if let Ok(mut dump) = bus.dump.lock() {
+        *dump = None;
+    }
+    if let Ok(mut buf) = bus.clip.lock() {
+        buf.clear();
+        buf.reserve(48_000 * 30);
+    }
+    bus.clip_on.store(true, Ordering::Relaxed);
+}
+
+fn clip_stop(bus: &FaceBus) {
+    bus.clip_on.store(false, Ordering::Relaxed);
+    let samples = bus
+        .clip
+        .lock()
+        .map(|mut b| std::mem::take(&mut *b))
+        .unwrap_or_default();
+    let sr = bus.clip_sr.load(Ordering::Relaxed).max(8_000);
+    let pcm: Vec<i16> = samples
+        .iter()
+        .map(|s| (s.clamp(-1.0, 1.0) * 32767.0) as i16)
+        .collect();
+    if let Ok(mut dump) = bus.dump.lock() {
+        *dump = Some(ClipDump {
+            sr,
+            pcm,
+            sent: 0,
+            begun: false,
+        });
+    }
+}
+
+fn pump_clip(ctx: &nih_plug_webview::WindowHandler, bus: &FaceBus) -> bool {
+    let Ok(mut slot) = bus.dump.lock() else {
+        return false;
+    };
+    let Some(dump) = slot.as_mut() else {
+        return false;
+    };
+    if !dump.begun {
+        let _ = ctx.send_json(json!({
+            "type": "clip",
+            "phase": "begin",
+            "sr": dump.sr,
+            "n": dump.pcm.len(),
+        }));
+        dump.begun = true;
+        return true;
+    }
+    if dump.sent < dump.pcm.len() {
+        let end = (dump.sent + CLIP_CHUNK).min(dump.pcm.len());
+        let slice = &dump.pcm[dump.sent..end];
+        let mut bytes = Vec::with_capacity(slice.len() * 2);
+        for s in slice {
+            bytes.extend_from_slice(&s.to_le_bytes());
+        }
+        let _ = ctx.send_json(json!({
+            "type": "clip",
+            "phase": "chunk",
+            "data": b64(&bytes),
+        }));
+        dump.sent = end;
+        return true;
+    }
+    let _ = ctx.send_json(json!({ "type": "clip", "phase": "end" }));
+    *slot = None;
+    true
+}
+
 pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<FaceBus>) -> Option<Box<dyn Editor>> {
     let face: &'static str = include_str!("face.html");
     let ready = Arc::new(AtomicBool::new(false));
@@ -144,10 +246,15 @@ pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<FaceBus>) -> Option<Bo
                             q.push((note, false, 0.0));
                         }
                     }
+                    Ok(Action::ClipStart) => clip_start(&bus),
+                    Ok(Action::ClipStop) => clip_stop(&bus),
                     Err(_) => {}
                 }
             }
             if !ready.load(Ordering::Relaxed) {
+                return;
+            }
+            if pump_clip(ctx, &bus) {
                 return;
             }
 

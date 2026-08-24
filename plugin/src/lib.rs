@@ -1,6 +1,7 @@
 use nih_plug::prelude::*;
-use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+
 
 mod editor;
 
@@ -152,12 +153,23 @@ impl Default for SkyForgeParams {
     }
 }
 
+pub(crate) struct ClipDump {
+    pub sr: u32,
+    pub pcm: Vec<i16>,
+    pub sent: usize,
+    pub begun: bool,
+}
+
 pub(crate) struct FaceBus {
     pub rms: AtomicU32,
     pub scope: Mutex<[f32; 192]>,
     pub i: AtomicUsize,
     pub held: Mutex<[bool; 128]>,
     pub inbox: Mutex<Vec<(u8, bool, f32)>>,
+    pub clip_on: AtomicBool,
+    pub clip_sr: AtomicU32,
+    pub clip: Mutex<Vec<f32>>,
+    pub dump: Mutex<Option<ClipDump>>,
 }
 
 impl FaceBus {
@@ -168,9 +180,14 @@ impl FaceBus {
             i: AtomicUsize::new(0),
             held: Mutex::new([false; 128]),
             inbox: Mutex::new(Vec::with_capacity(32)),
+            clip_on: AtomicBool::new(false),
+            clip_sr: AtomicU32::new(44_100),
+            clip: Mutex::new(Vec::new()),
+            dump: Mutex::new(None),
         })
     }
 }
+
 
 #[derive(Clone, Copy)]
 struct Shape {
@@ -727,6 +744,12 @@ impl Plugin for SkyForge {
         }
 
         let mut peak = 0.0f32;
+        let rec = self.bus.clip_on.load(Ordering::Relaxed);
+        let mut rec_local: Vec<f32> = Vec::new();
+        if rec {
+            rec_local.reserve(len);
+        }
+        self.bus.clip_sr.store(sr as u32, Ordering::Relaxed);
         for i in 0..len {
             while let Some(event) = next_event {
                 if event.timing() as usize > i {
@@ -917,6 +940,9 @@ impl Plugin for SkyForge {
                 outputs[1][i] = out;
             }
             peak = peak.max(out.abs());
+            if rec {
+                rec_local.push(out);
+            }
             if i & 7 == 0 {
                 if let Ok(mut sc) = self.bus.scope.try_lock() {
                     let idx = self.bus.i.fetch_add(1, Ordering::Relaxed) % sc.len();
@@ -928,6 +954,21 @@ impl Plugin for SkyForge {
         let old = f32::from_bits(self.bus.rms.load(Ordering::Relaxed));
         let rms = (old * 0.88 + peak * 0.22).clamp(0.0, 1.0);
         self.bus.rms.store(rms.to_bits(), Ordering::Relaxed);
+        if rec {
+            if let Ok(mut buf) = self.bus.clip.try_lock() {
+                let max = (30.0 * sr) as usize;
+                let room = max.saturating_sub(buf.len());
+                if room == 0 {
+                    self.bus.clip_on.store(false, Ordering::Relaxed);
+                } else {
+                    let n = rec_local.len().min(room);
+                    buf.extend_from_slice(&rec_local[..n]);
+                    if buf.len() >= max {
+                        self.bus.clip_on.store(false, Ordering::Relaxed);
+                    }
+                }
+            }
+        }
         if let Ok(mut held) = self.bus.held.try_lock() {
             *held = [false; 128];
             for v in &self.voices {
