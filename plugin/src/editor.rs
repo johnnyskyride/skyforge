@@ -27,6 +27,10 @@ enum Action {
     ClipStart { mode: Option<String> },
     ClipStop,
     MidiDump,
+    SaveStart { name: String },
+    SaveChunk { data: String },
+    SaveEnd,
+    SaveWav { stem: Option<String> },
 }
 
 #[derive(Deserialize)]
@@ -297,7 +301,11 @@ fn clip_start(bus: &crate::FaceBus, mode: &str) {
     bus.clip_on.store(true, Ordering::Relaxed);
 }
 
-fn clip_stop(bus: &crate::FaceBus) {
+fn saved_json(ok: bool, name: &str) -> serde_json::Value {
+    json!({ "type": "saved", "ok": ok, "name": name })
+}
+
+fn clip_stop(bus: &crate::FaceBus) -> (String, u32, Vec<i16>) {
     bus.clip_on.store(false, Ordering::Relaxed);
     let mode = bus
         .clip_mode
@@ -314,15 +322,10 @@ fn clip_stop(bus: &crate::FaceBus) {
         .iter()
         .map(|s| (s.clamp(-1.0, 1.0) * 32767.0) as i16)
         .collect();
-    if let Ok(mut dump) = bus.dump.lock() {
-        *dump = Some(crate::ClipDump {
-            sr,
-            pcm,
-            sent: 0,
-            begun: false,
-            mode: if mode.is_empty() { "wyrm".to_string() } else { mode },
-        });
+    if let Ok(mut last) = bus.last_pcm.lock() {
+        *last = Some((sr, pcm.clone()));
     }
+    (if mode.is_empty() { "wyrm".to_string() } else { mode }, sr, pcm)
 }
 
 fn pump_clip(ctx: &nih_plug_webview::WindowHandler, bus: &crate::FaceBus) -> bool {
@@ -367,20 +370,83 @@ fn pump_midi(ctx: &nih_plug_webview::WindowHandler, bus: &crate::FaceBus) {
     let events = bus
         .midi
         .lock()
-        .map(|log| {
-            log.iter()
-                .map(|(t, note, on, vel)| {
-                    json!({
-                        "t": t,
-                        "type": if *on { "on" } else { "off" },
-                        "midi": note,
-                        "vel": vel,
-                    })
-                })
-                .collect::<Vec<_>>()
-        })
+        .map(|log| log.clone())
         .unwrap_or_default();
-    let _ = ctx.send_json(json!({ "type": "midi", "events": events }));
+    if events.is_empty() {
+        let _ = ctx.send_json(saved_json(false, "skyforge-clip.mid"));
+        return;
+    }
+    let name = format!("skyforge-clip-{}.mid", crate::files::stamp());
+    match crate::files::write_midi(&name, &events) {
+        Ok(path) => {
+            let _ = ctx.send_json(saved_json(true, &crate::files::file_name(&path)));
+        }
+        Err(_) => {
+            let _ = ctx.send_json(saved_json(false, &name));
+        }
+    }
+}
+
+fn save_start(bus: &crate::FaceBus, name: String) {
+    if let Ok(mut slot) = bus.save.lock() {
+        *slot = Some((name, Vec::with_capacity(256_000)));
+    }
+}
+
+fn save_chunk(bus: &crate::FaceBus, data: &str) {
+    if let Ok(mut slot) = bus.save.lock() {
+        if let Some((_, buf)) = slot.as_mut() {
+            buf.extend_from_slice(&crate::files::decode_b64(data));
+        }
+    }
+}
+
+fn save_end(ctx: &nih_plug_webview::WindowHandler, bus: &crate::FaceBus) {
+    let taken = bus.save.lock().ok().and_then(|mut s| s.take());
+    let Some((name, bytes)) = taken else {
+        let _ = ctx.send_json(saved_json(false, "skyforge.bin"));
+        return;
+    };
+    if bytes.is_empty() {
+        let _ = ctx.send_json(saved_json(false, &name));
+        return;
+    }
+    match crate::files::write_download(&name, &bytes) {
+        Ok(path) => {
+            let _ = ctx.send_json(saved_json(true, &crate::files::file_name(&path)));
+        }
+        Err(_) => {
+            let _ = ctx.send_json(saved_json(false, &name));
+        }
+    }
+}
+
+fn save_wav(ctx: &nih_plug_webview::WindowHandler, bus: &crate::FaceBus, stem: Option<String>) {
+    let taken = bus.last_pcm.lock().ok().and_then(|g| g.clone());
+    let Some((sr, pcm)) = taken else {
+        let _ = ctx.send_json(saved_json(false, "skyforge-bounce.wav"));
+        return;
+    };
+    let stem = stem
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("skyforge-bounce-{}", crate::files::stamp()));
+    let name = if stem.ends_with(".wav") {
+        stem
+    } else {
+        format!("{stem}.wav")
+    };
+    if (pcm.len() as f32) < sr as f32 * 0.15 {
+        let _ = ctx.send_json(saved_json(false, &name));
+        return;
+    }
+    match crate::files::write_wav(&name, &pcm, sr) {
+        Ok(path) => {
+            let _ = ctx.send_json(saved_json(true, &crate::files::file_name(&path)));
+        }
+        Err(_) => {
+            let _ = ctx.send_json(saved_json(false, &name));
+        }
+    }
 }
 
 pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<crate::FaceBus>) -> Option<Box<dyn Editor>> {
@@ -428,9 +494,40 @@ pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<crate::FaceBus>) -> Op
                         if let Ok(mut face) = params.face.lock() {
                             face.rec.clear();
                         }
-                        clip_stop(&bus);
+                        let (mode, sr, pcm) = clip_stop(&bus);
+                        if mode == "bounce" {
+                            let name = format!("skyforge-bounce-{}.wav", crate::files::stamp());
+                            let long_enough = (pcm.len() as f32) >= sr as f32 * 0.15;
+                            if long_enough {
+                                match crate::files::write_wav(&name, &pcm, sr) {
+                                    Ok(path) => {
+                                        let _ = ctx.send_json(saved_json(
+                                            true,
+                                            &crate::files::file_name(&path),
+                                        ));
+                                    }
+                                    Err(_) => {
+                                        let _ = ctx.send_json(saved_json(false, &name));
+                                    }
+                                }
+                            } else {
+                                let _ = ctx.send_json(saved_json(false, &name));
+                            }
+                        } else if let Ok(mut dump) = bus.dump.lock() {
+                            *dump = Some(crate::ClipDump {
+                                sr,
+                                pcm,
+                                sent: 0,
+                                begun: false,
+                                mode,
+                            });
+                        }
                     }
                     Ok(Action::MidiDump) => pump_midi(ctx, &bus),
+                    Ok(Action::SaveStart { name }) => save_start(&bus, name),
+                    Ok(Action::SaveChunk { data }) => save_chunk(&bus, &data),
+                    Ok(Action::SaveEnd) => save_end(ctx, &bus),
+                    Ok(Action::SaveWav { stem }) => save_wav(ctx, &bus, stem),
                     Err(_) => {}
                 }
             }

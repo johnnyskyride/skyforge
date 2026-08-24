@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 
 
 mod editor;
+mod files;
 
 const MAX_VOICES: usize = 8;
 const HAUNT_SECS: f32 = 0.55;
@@ -204,6 +205,8 @@ pub(crate) struct FaceBus {
     pub dump: Mutex<Option<ClipDump>>,
     pub midi: Mutex<Vec<(f32, u8, bool, f32)>>,
     pub midi_t: AtomicU32,
+    pub last_pcm: Mutex<Option<(u32, Vec<i16>)>>,
+    pub save: Mutex<Option<(String, Vec<u8>)>>,
 }
 
 impl FaceBus {
@@ -221,6 +224,8 @@ impl FaceBus {
             dump: Mutex::new(None),
             midi: Mutex::new(Vec::with_capacity(256)),
             midi_t: AtomicU32::new(0),
+            last_pcm: Mutex::new(None),
+            save: Mutex::new(None),
         })
     }
 }

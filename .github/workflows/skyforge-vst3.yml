@@ -57,7 +57,7 @@ jobs:
 
             **Ear Wyrm works in Live now.** Press **Ear Wyrm**, play, press **Stop**, wait for **Cut…**. The take is the native instrument, then the clip is cut on the face. Play at least a beat — a tap with no notes will not cut a wyrm.
 
-            **Bounce** writes a WAV of the native take. **MIDI** dumps the notes Live played.
+            **Bounce** writes a WAV of the native take into **Downloads**. **MIDI** dumps the notes there too. Ear Wyrm video and WAV/MP3 land in Downloads from the face.
 
             Put SkyForge on a **MIDI track**. Arm the track. Play.
 
