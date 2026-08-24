@@ -31,9 +31,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       - name: Stage instrument
+        shell: bash
         run: |
           mkdir -p desktop/dist
-          cp public/SkyForge.html desktop/dist/index.html || cp SkyForge.html desktop/dist/index.html
+          if [ -f public/SkyForge.html ]; then
+            cp public/SkyForge.html desktop/dist/index.html
+          else
+            cp SkyForge.html desktop/dist/index.html
+          fi
       - run: npm install
         working-directory: desktop
       - uses: tauri-apps/tauri-action@v0
