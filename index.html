@@ -10,6 +10,7 @@
       --bg: #1a1623; --chassis: #221c2e; --panel: #2c253a; --well: #14101c;
       --fg: #ece8f0; --muted: #9b93ab; --subtle: #6e677c; --accent: #b7a8d4;
       --led: #86c5b5; --clip: #c45c5c; --haunt: #d4783a; --border: #3d3650;
+      --emerald: #12e08a; --pearl: #d9b8ff; --ghost: #f4efe6;
       --key-w: #e6e2d8; --key-b: #16171c;
       --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
       --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
@@ -78,14 +79,31 @@
     @media (min-width: 640px) { .hint { display: block; } }
     .knobs { display: flex; align-items: end; gap: 6px; overflow-x: auto; margin-bottom: 8px; }
     .knob { width: 56px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; touch-action: none; }
-    .knob.haunt { margin-left: 18px; }
+    .knob.ghost { margin-left: 18px; }
     .knob .name { font-family: var(--mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
-    .knob.haunt .name { color: var(--haunt); }
+    .knob.emerald .name { color: var(--emerald); }
+    .knob.pearl .name { color: var(--pearl); }
+    .knob.ghost .name { color: var(--ghost); }
     .knob .val { font-family: var(--mono); font-size: 12px; }
     .cap { width: 40px; height: 40px; border-radius: 999px; position: relative;
       background: radial-gradient(circle at 32% 28%, color-mix(in oklab, var(--fg) 18%, transparent), transparent 42%), var(--panel);
       box-shadow: inset 0 1px 0 color-mix(in oklab, var(--fg) 16%, transparent), inset 0 -8px 12px #0006; }
+    .knob.emerald .cap {
+      background: radial-gradient(circle at 30% 24%, #d8ffe9 0%, #3dffb0 22%, transparent 46%), radial-gradient(circle at 72% 78%, #046b3e, #0a2e1c);
+      box-shadow: inset 0 1px 0 rgb(255 255 255 / .35), inset 0 -8px 12px rgb(0 40 22 / .45), 0 0 10px color-mix(in oklab, var(--emerald) 45%, transparent);
+    }
+    .knob.pearl .cap {
+      background: radial-gradient(circle at 28% 22%, #fff 0%, #f3e4ff 26%, transparent 48%), radial-gradient(circle at 78% 82%, #7c49c9, #2d184e);
+      box-shadow: inset 0 1px 0 rgb(255 255 255 / .5), inset 0 -8px 12px rgb(40 16 70 / .4), 0 0 10px color-mix(in oklab, var(--pearl) 40%, transparent);
+    }
+    .knob.ghost .cap {
+      background: radial-gradient(circle at 28% 20%, #fff 0%, #fff8ee 24%, transparent 50%), linear-gradient(160deg, #fbf7f0 0%, #e8dfd2 55%, #cfc4b4 100%);
+      box-shadow: inset 0 1px 0 rgb(255 255 255 / .7), inset 0 -8px 10px rgb(90 70 40 / .18), 0 0 10px rgb(255 250 240 / .28);
+    }
     .tick { position: absolute; top: 12%; left: 50%; width: 2px; height: 28%; background: var(--fg); border-radius: 1px; transform: translateX(-50%); }
+    .knob.emerald .tick { background: #e8fff2; }
+    .knob.pearl .tick { background: #f8eeff; }
+    .knob.ghost .tick { background: #3a342c; }
     .piano { position: relative; height: 88px; background: var(--well); border-radius: 8px; padding: 6px; display: flex; }
     .wkey { flex: 1; min-width: 0; margin-right: 2px; border-radius: 0 0 4px 4px; background: var(--key-w); color: var(--subtle);
       display: flex; flex-direction: column; justify-content: end; align-items: center; gap: 2px; padding-bottom: 4px;
@@ -390,8 +408,8 @@ function paintKeys(){
   });
 }
 
-function knob(parent, key, label, fmt, haunt){
-  const el=document.createElement("div"); el.className="knob"+(haunt?" haunt":"");
+function knob(parent, key, label, fmt, tone){
+  const el=document.createElement("div"); el.className="knob"+(tone?" "+tone:"");
   el.innerHTML=`<div class="name">${label}</div><div class="cap" role="slider" tabindex="0"><span class="tick"></span></div><div class="val"></div>`;
   parent.appendChild(el);
   const cap=el.querySelector(".cap"), val=el.querySelector(".val"), tick=el.querySelector(".tick");
@@ -427,11 +445,11 @@ function buildUI(){
     filts.appendChild(b);
   });
   const fk=document.getElementById("filterKnobs");
-  knob(fk,"cutoff","Cutoff",fmtHz); knob(fk,"reso","Reso",v=>v.toFixed(1));
+  knob(fk,"cutoff","Cutoff",fmtHz,"emerald"); knob(fk,"reso","Reso",v=>v.toFixed(1),"emerald");
   const ek=document.getElementById("envKnobs");
-  knob(ek,"attack","Attack",fmtTime); knob(ek,"decay","Decay",fmtTime);
-  knob(ek,"sustain","Sustain",v=>v.toFixed(2)); knob(ek,"release","Release",fmtTime);
-  knob(ek,"volume","Volume",fmtDb); knob(ek,"halloween","Halloween",v=>v,true);
+  knob(ek,"attack","Attack",fmtTime,"pearl"); knob(ek,"decay","Decay",fmtTime,"pearl");
+  knob(ek,"sustain","Sustain",v=>v.toFixed(2),"pearl"); knob(ek,"release","Release",fmtTime,"pearl");
+  knob(ek,"volume","Volume",fmtDb,"pearl"); knob(ek,"halloween","Halloween",v=>v,"ghost");
   const piano=document.getElementById("piano");
   const whites=[];
   for (let i=0;i<SPAN;i++){
