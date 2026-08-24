@@ -1,0 +1,12 @@
+{
+  "name": "skyforge-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SkyForge native shell — @johnnyskyride",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.8.5"
+  }
+}
