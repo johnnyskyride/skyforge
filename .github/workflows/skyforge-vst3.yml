@@ -22,6 +22,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Linux GUI libs
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libgl1-mesa-dev libglu1-mesa-dev libxcursor-dev libxkbcommon-dev libx11-dev libxrandr-dev libxi-dev libxcb-xfixes0-dev
       - name: Build plugin
         working-directory: plugin
         run: cargo build --release --locked

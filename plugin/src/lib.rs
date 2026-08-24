@@ -1,12 +1,15 @@
 use nih_plug::prelude::*;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+
+mod editor;
 
 const MAX_VOICES: usize = 8;
 const HAUNT_SECS: f32 = 0.55;
 const WATER_SECS: f32 = 0.16;
 
 #[derive(Enum, PartialEq, Clone, Copy)]
-enum WaveKind {
+pub(crate) enum WaveKind {
     #[id = "sine"]
     Sine,
     #[id = "tri"]
@@ -22,7 +25,7 @@ enum WaveKind {
 }
 
 #[derive(Enum, PartialEq, Clone, Copy)]
-enum FilterKind {
+pub(crate) enum FilterKind {
     #[id = "lp"]
     Lowpass,
     #[id = "hp"]
@@ -32,7 +35,7 @@ enum FilterKind {
 }
 
 #[derive(Enum, PartialEq, Clone, Copy)]
-enum Kind {
+pub(crate) enum Kind {
     #[id = "free"]
     Free,
     #[id = "earth"]
@@ -46,7 +49,9 @@ enum Kind {
 }
 
 #[derive(Params)]
-struct SkyForgeParams {
+pub(crate) struct SkyForgeParams {
+    #[persist = "editor-state"]
+    pub editor_state: Arc<nih_plug_egui::EguiState>,
     #[id = "kind"]
     pub kind: EnumParam<Kind>,
     #[id = "wave"]
@@ -84,6 +89,7 @@ struct SkyForgeParams {
 impl Default for SkyForgeParams {
     fn default() -> Self {
         Self {
+            editor_state: nih_plug_egui::EguiState::from_size(editor::FACE_W, editor::FACE_H),
             kind: EnumParam::new("Kind", Kind::Free),
             wave: EnumParam::new("Wave", WaveKind::Saw),
             pulse_width: FloatParam::new("Width", 0.25, FloatRange::Linear { min: 0.05, max: 0.5 })
@@ -146,6 +152,26 @@ impl Default for SkyForgeParams {
             aether: FloatParam::new("Aether", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_smoother(SmoothingStyle::Linear(50.0)),
         }
+    }
+}
+
+pub(crate) struct FaceBus {
+    pub rms: AtomicU32,
+    pub scope: Mutex<[f32; 192]>,
+    pub i: AtomicUsize,
+    pub held: Mutex<[bool; 128]>,
+    pub inbox: Mutex<Vec<(u8, bool, f32)>>,
+}
+
+impl FaceBus {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            rms: AtomicU32::new(0),
+            scope: Mutex::new([0.0; 192]),
+            i: AtomicUsize::new(0),
+            held: Mutex::new([false; 128]),
+            inbox: Mutex::new(Vec::with_capacity(32)),
+        })
     }
 }
 
@@ -519,6 +545,7 @@ fn cents_ratio(cents: f32) -> f32 {
 
 struct SkyForge {
     params: Arc<SkyForgeParams>,
+    bus: Arc<FaceBus>,
     voices: [Voice; MAX_VOICES],
     sr: f32,
     age: u64,
@@ -542,6 +569,7 @@ impl Default for SkyForge {
     fn default() -> Self {
         Self {
             params: Arc::new(SkyForgeParams::default()),
+            bus: FaceBus::new(),
             voices: std::array::from_fn(|_| Voice::new()),
             sr: 44_100.0,
             age: 0,
@@ -647,6 +675,10 @@ impl Plugin for SkyForge {
         self.params.clone()
     }
 
+    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        editor::build_editor(self.params.clone(), self.bus.clone())
+    }
+
     fn initialize(
         &mut self,
         _audio_io_layout: &AudioIOLayout,
@@ -683,6 +715,17 @@ impl Plugin for SkyForge {
             }
         }
 
+        if let Ok(mut q) = self.bus.inbox.lock() {
+            for (note, on, vel) in q.drain(..) {
+                if on {
+                    self.note_on(note, vel);
+                } else {
+                    self.note_off(note);
+                }
+            }
+        }
+
+        let mut peak = 0.0f32;
         for i in 0..len {
             while let Some(event) = next_event {
                 if event.timing() as usize > i {
@@ -871,6 +914,25 @@ impl Plugin for SkyForge {
             }
             if outputs.len() > 1 {
                 outputs[1][i] = out;
+            }
+            peak = peak.max(out.abs());
+            if i & 7 == 0 {
+                if let Ok(mut sc) = self.bus.scope.try_lock() {
+                    let idx = self.bus.i.fetch_add(1, Ordering::Relaxed) % sc.len();
+                    sc[idx] = mix.clamp(-1.0, 1.0);
+                }
+            }
+        }
+
+        let old = f32::from_bits(self.bus.rms.load(Ordering::Relaxed));
+        let rms = (old * 0.88 + peak * 0.22).clamp(0.0, 1.0);
+        self.bus.rms.store(rms.to_bits(), Ordering::Relaxed);
+        if let Ok(mut held) = self.bus.held.try_lock() {
+            *held = [false; 128];
+            for v in &self.voices {
+                if v.active && (v.note as usize) < 128 {
+                    held[v.note as usize] = true;
+                }
             }
         }
 
