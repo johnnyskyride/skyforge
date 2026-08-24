@@ -1,4 +1,4 @@
-use crate::{ClipDump, FaceBus, FilterKind, SkyForgeParams, WaveKind};
+use crate::{FaceState, FilterKind, SkyForgeParams, WaveKind};
 use nih_plug::prelude::*;
 use nih_plug_webview::{HTMLSource, Key, WebViewEditor};
 use serde::Deserialize;
@@ -15,6 +15,13 @@ const CLIP_CHUNK: usize = 24_576;
 enum Action {
     Init,
     Patch { params: JsParams },
+    Face {
+        skin: Option<String>,
+        trim: Option<String>,
+        handle: Option<String>,
+        kind: Option<String>,
+        preset: Option<String>,
+    },
     NoteOn { note: u8, vel: Option<f32> },
     NoteOff { note: u8 },
     ClipStart,
@@ -53,11 +60,30 @@ fn wave_from(s: &str) -> WaveKind {
     }
 }
 
+fn wave_to(w: WaveKind) -> &'static str {
+    match w {
+        WaveKind::Sine => "sine",
+        WaveKind::Triangle => "triangle",
+        WaveKind::Saw => "sawtooth",
+        WaveKind::Square => "square",
+        WaveKind::Pulse => "pulse",
+        WaveKind::Noise => "noise",
+    }
+}
+
 fn filter_from(s: &str) -> FilterKind {
     match s {
         "highpass" => FilterKind::Highpass,
         "bandpass" => FilterKind::Bandpass,
         _ => FilterKind::Lowpass,
+    }
+}
+
+fn filter_to(f: FilterKind) -> &'static str {
+    match f {
+        FilterKind::Lowpass => "lowpass",
+        FilterKind::Highpass => "highpass",
+        FilterKind::Bandpass => "bandpass",
     }
 }
 
@@ -125,6 +151,107 @@ fn apply_patch(setter: &ParamSetter, params: &SkyForgeParams, patch: JsParams) {
     }
 }
 
+fn clean_skin(s: &str) -> Option<String> {
+    match s {
+        "forge" | "rack" => Some(s.to_string()),
+        _ => None,
+    }
+}
+
+fn clean_trim(s: &str) -> Option<String> {
+    match s {
+        "off" | "plasma" | "purple" | "green" => Some(s.to_string()),
+        _ => None,
+    }
+}
+
+fn clean_kind(s: &str) -> String {
+    match s.to_ascii_uppercase().as_str() {
+        "EARTH" | "WATER" | "FIRE" | "WIND" => s.to_ascii_uppercase(),
+        _ => "free".to_string(),
+    }
+}
+
+fn clean_handle(s: &str) -> String {
+    s.trim()
+        .trim_start_matches('@')
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .take(15)
+        .collect()
+}
+
+fn apply_face(params: &SkyForgeParams, patch: Action) {
+    let Action::Face {
+        skin,
+        trim,
+        handle,
+        kind,
+        preset,
+    } = patch
+    else {
+        return;
+    };
+    let Ok(mut face) = params.face.lock() else {
+        return;
+    };
+    if let Some(s) = skin.as_deref().and_then(clean_skin) {
+        face.skin = s;
+    }
+    if let Some(s) = trim.as_deref().and_then(clean_trim) {
+        face.trim = s;
+    }
+    if let Some(s) = handle.as_deref() {
+        face.handle = clean_handle(s);
+    }
+    if let Some(s) = kind.as_deref() {
+        face.kind = clean_kind(s);
+    }
+    if let Some(s) = preset {
+        let t: String = s
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+            .take(24)
+            .collect();
+        if !t.is_empty() {
+            face.preset = t;
+        }
+    }
+}
+
+fn snapshot(params: &SkyForgeParams) -> serde_json::Value {
+    let face = params
+        .face
+        .lock()
+        .map(|f| f.clone())
+        .unwrap_or_else(|_| FaceState::default());
+    json!({
+        "type": "state",
+        "params": {
+            "waveform": wave_to(params.wave.value()),
+            "pulseWidth": params.pulse_width.value(),
+            "filterType": filter_to(params.filter.value()),
+            "cutoff": params.cutoff.value(),
+            "resonance": params.reso.value(),
+            "attack": params.attack.value(),
+            "decay": params.decay.value(),
+            "sustain": params.sustain.value(),
+            "release": params.release.value(),
+            "octave": params.octave.value(),
+            "volume": params.volume.value(),
+            "halloween": params.halloween.value(),
+            "waters": params.waters.value(),
+            "aether": params.aether.value(),
+            "unison": params.unison.value(),
+        },
+        "skin": face.skin,
+        "trim": face.trim,
+        "handle": face.handle,
+        "kind": face.kind,
+        "preset": face.preset,
+    })
+}
+
 fn b64(data: &[u8]) -> String {
     const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
@@ -153,7 +280,7 @@ fn b64(data: &[u8]) -> String {
     out
 }
 
-fn clip_start(bus: &FaceBus) {
+fn clip_start(bus: &crate::FaceBus) {
     bus.clip_on.store(false, Ordering::Relaxed);
     if let Ok(mut dump) = bus.dump.lock() {
         *dump = None;
@@ -165,7 +292,7 @@ fn clip_start(bus: &FaceBus) {
     bus.clip_on.store(true, Ordering::Relaxed);
 }
 
-fn clip_stop(bus: &FaceBus) {
+fn clip_stop(bus: &crate::FaceBus) {
     bus.clip_on.store(false, Ordering::Relaxed);
     let samples = bus
         .clip
@@ -178,7 +305,7 @@ fn clip_stop(bus: &FaceBus) {
         .map(|s| (s.clamp(-1.0, 1.0) * 32767.0) as i16)
         .collect();
     if let Ok(mut dump) = bus.dump.lock() {
-        *dump = Some(ClipDump {
+        *dump = Some(crate::ClipDump {
             sr,
             pcm,
             sent: 0,
@@ -187,7 +314,7 @@ fn clip_stop(bus: &FaceBus) {
     }
 }
 
-fn pump_clip(ctx: &nih_plug_webview::WindowHandler, bus: &FaceBus) -> bool {
+fn pump_clip(ctx: &nih_plug_webview::WindowHandler, bus: &crate::FaceBus) -> bool {
     let Ok(mut slot) = bus.dump.lock() else {
         return false;
     };
@@ -224,7 +351,7 @@ fn pump_clip(ctx: &nih_plug_webview::WindowHandler, bus: &FaceBus) -> bool {
     true
 }
 
-pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<FaceBus>) -> Option<Box<dyn Editor>> {
+pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<crate::FaceBus>) -> Option<Box<dyn Editor>> {
     let face: &'static str = include_str!("face.html");
     let ready = Arc::new(AtomicBool::new(false));
     let editor = WebViewEditor::new(HTMLSource::String(face), (FACE_W, FACE_H))
@@ -234,8 +361,17 @@ pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<FaceBus>) -> Option<Bo
         .with_event_loop(move |ctx, setter, _window| {
             while let Ok(value) = ctx.next_event() {
                 match serde_json::from_value::<Action>(value) {
-                    Ok(Action::Init) => ready.store(true, Ordering::Relaxed),
-                    Ok(Action::Patch { params: patch }) => apply_patch(&setter, &params, patch),
+                    Ok(Action::Init) => {
+                        ready.store(true, Ordering::Relaxed);
+                        let _ = ctx.send_json(snapshot(&params));
+                    }
+                    Ok(Action::Patch { params: patch }) => {
+                        apply_patch(&setter, &params, patch);
+                        if let Ok(mut face) = params.face.lock() {
+                            face.preset = "custom".to_string();
+                        }
+                    }
+                    Ok(action @ Action::Face { .. }) => apply_face(&params, action),
                     Ok(Action::NoteOn { note, vel }) => {
                         if let Ok(mut q) = bus.inbox.lock() {
                             q.push((note, true, vel.unwrap_or(0.9)));

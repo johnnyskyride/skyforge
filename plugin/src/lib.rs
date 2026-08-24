@@ -1,6 +1,8 @@
 use nih_plug::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+
 
 
 mod editor;
@@ -49,6 +51,28 @@ pub(crate) enum Kind {
     Wind,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub(crate) struct FaceState {
+    pub skin: String,
+    pub trim: String,
+    pub handle: String,
+    pub kind: String,
+    pub preset: String,
+}
+
+impl Default for FaceState {
+    fn default() -> Self {
+        Self {
+            skin: "forge".to_string(),
+            trim: "off".to_string(),
+            handle: String::new(),
+            kind: "free".to_string(),
+            preset: "init".to_string(),
+        }
+    }
+}
+
 #[derive(Params)]
 pub(crate) struct SkyForgeParams {
     #[id = "kind"]
@@ -83,7 +107,10 @@ pub(crate) struct SkyForgeParams {
     pub waters: FloatParam,
     #[id = "aether"]
     pub aether: FloatParam,
+    #[persist = "face"]
+    pub face: Mutex<FaceState>,
 }
+
 
 impl Default for SkyForgeParams {
     fn default() -> Self {
@@ -149,6 +176,7 @@ impl Default for SkyForgeParams {
                 .with_smoother(SmoothingStyle::Linear(50.0)),
             aether: FloatParam::new("Aether", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_smoother(SmoothingStyle::Linear(50.0)),
+            face: Mutex::new(FaceState::default()),
         }
     }
 }
