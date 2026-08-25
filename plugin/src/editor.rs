@@ -21,11 +21,14 @@ enum Action {
         handle: Option<String>,
         kind: Option<String>,
         preset: Option<String>,
+        scale: Option<f32>,
+        banks: Option<String>,
     },
     NoteOn { note: u8, vel: Option<f32> },
     NoteOff { note: u8 },
     ClipStart { mode: Option<String> },
     ClipStop,
+    Scale { factor: f32 },
     MidiDump,
     SaveStart { name: String },
     SaveChunk { data: String },
@@ -202,6 +205,8 @@ fn apply_face(params: &SkyForgeParams, patch: Action) {
         handle,
         kind,
         preset,
+        scale,
+        banks,
     } = patch
     else {
         return;
@@ -225,12 +230,41 @@ fn apply_face(params: &SkyForgeParams, patch: Action) {
         let t: String = s
             .chars()
             .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-            .take(24)
+            .take(40)
             .collect();
         if !t.is_empty() {
             face.preset = t;
         }
     }
+    if let Some(v) = scale {
+        face.scale = clean_scale(v);
+    }
+    if let Some(s) = banks {
+        if s.len() <= 48_000 {
+            face.banks = s;
+        }
+    }
+}
+
+fn clean_scale(v: f32) -> f32 {
+    let stops = [0.75_f32, 1.0, 1.25, 1.5, 2.0];
+    let mut best = 1.0;
+    let mut dist = f32::MAX;
+    for s in stops {
+        let d = (s - v).abs();
+        if d < dist {
+            dist = d;
+            best = s;
+        }
+    }
+    best
+}
+
+fn face_px(factor: f32) -> (u32, u32) {
+    let f = clean_scale(factor);
+    let w = ((FACE_W as f32) * f).round() as u32;
+    let h = ((FACE_H as f32) * f).round() as u32;
+    (w.max(640), h.max(420))
 }
 
 fn snapshot(params: &SkyForgeParams) -> serde_json::Value {
@@ -264,6 +298,9 @@ fn snapshot(params: &SkyForgeParams) -> serde_json::Value {
         "kind": face.kind,
         "preset": face.preset,
         "rec": face.rec,
+        "scale": face.scale,
+        "banks": face.banks,
+        "version": env!("CARGO_PKG_VERSION"),
     })
 }
 
@@ -575,17 +612,24 @@ pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<crate::FaceBus>) -> Op
     let resync = Arc::new(AtomicBool::new(true));
     let hydrate = Arc::new(AtomicU32::new(0));
     let editor = WebViewEditor::new(HTMLSource::String(face), (FACE_W, FACE_H))
-        .with_background_color((0x4a, 0x3a, 0x62, 255))
+        .with_background_color((0x22, 0x1c, 0x2e, 255))
         .with_developer_mode(false)
         .with_keyboard_handler(|event| event.key == Key::Escape)
         .with_resync(resync.clone())
-        .with_event_loop(move |ctx, setter, _window| {
+        .with_event_loop(move |ctx, setter, window| {
             while let Ok(value) = ctx.next_event() {
                 match serde_json::from_value::<Action>(value) {
                     Ok(Action::Init) => {
                         ready.store(true, Ordering::Relaxed);
                         load_wyrms(&params, &bus);
                         push_state(ctx, &params, &bus, true);
+                        let scale = params
+                            .face
+                            .lock()
+                            .map(|f| f.scale)
+                            .unwrap_or(1.0);
+                        let (w, h) = face_px(scale);
+                        ctx.resize(window, w, h);
                     }
                     Ok(Action::Patch { params: patch }) => {
                         apply_patch(&setter, &params, patch);
@@ -594,6 +638,14 @@ pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<crate::FaceBus>) -> Op
                         }
                     }
                     Ok(action @ Action::Face { .. }) => apply_face(&params, action),
+                    Ok(Action::Scale { factor }) => {
+                        let f = clean_scale(factor);
+                        if let Ok(mut face) = params.face.lock() {
+                            face.scale = f;
+                        }
+                        let (w, h) = face_px(f);
+                        ctx.resize(window, w, h);
+                    }
                     Ok(Action::NoteOn { note, vel }) => {
                         if let Ok(mut q) = bus.inbox.lock() {
                             q.push((note, true, vel.unwrap_or(0.9)));

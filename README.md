@@ -31,7 +31,7 @@ then Live → Settings → Plug-Ins → enable VST3 system folders → **Rescan*
 
 **Mac:** unzip into `~/Library/Audio/Plug-Ins/VST3/` then rescan.
 
-The Live plugin window is the same SkyForge as the HTML and the app — Forge and Rack skins, knobs, keys, Call, trim glow. Kind = Free uses the knobs. Earth / Water / Fire / Wind load that dragon character. Volume, Halloween, and Aether still layer on top.
+The Live plugin window is the chassis — no extra pad around the face. Same SkyForge as the HTML and the app — Forge and Rack skins, knobs, keys, Call, trim glow. **Options** on the header saves and loads your presets, sizes the face (75–200%), and checks for a newer Live build. Kind = Free uses the knobs. Earth / Water / Fire / Wind load that dragon character. Volume, Halloween, and Aether still layer on top.
 
 Hide or fold the window in Live — the instrument stays. Knobs, Kind, Rack, trim, handle, and the last three Ear Wyrms come back when you open the face again.
 

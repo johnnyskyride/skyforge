@@ -55,6 +55,13 @@ jobs:
 
             Sound is native (bounce and freeze work).
 
+            The plugin window is the chassis. No extra pad, no rounded outer frame — Live's own title strip is the only chrome Ableton draws.
+
+            **Options** (header, next to the preset list):
+            - Save / load your own presets (JSON). Saved takes also land in Downloads.
+            - Size the face: 75% / 100% / 125% / 150% / 200%.
+            - Check for updates (latest Live build on GitHub).
+
             **Ear Wyrm works in Live now.** Press **Ear Wyrm**, play, press **Stop**, wait for **Cut…**. The take is the native instrument, then the clip is cut on the face. Play at least a beat — a tap with no notes will not cut a wyrm.
 
             **Bounce** writes a WAV of the native take into **Downloads**. **MIDI** dumps the notes there too. Ear Wyrm video and WAV/MP3 land in Downloads from the face.
@@ -67,15 +74,16 @@ jobs:
 
             **Mac:** unzip into `~/Library/Audio/Plug-Ins/VST3/` then rescan.
 
-            Hide or fold the window — knobs, Kind, Rack, trim, handle, and the last three Ear Wyrms stay. Open it again and the face comes back as you left it.
+            Hide or fold the window — knobs, Kind, Rack, trim, handle, size, your presets, and the last three Ear Wyrms stay. Open it again and the face comes back as you left it.
 
-            Replace any older SkyForge VST (vst3-11 and earlier) with this one, then rescan.
+            Replace any older SkyForge VST (vst3-12 and earlier) with this one, then rescan.
 
             Kind = Free uses the knobs. Earth / Water / Fire / Wind load that dragon character (Volume / Halloween / Aether still layer on top).
 
             Switch **Forge / Rack** on the face the same way as the app.
 
             The HTML file and the desktop app stay as they are. This is the Live twin.
+
           files: plugin/dist/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

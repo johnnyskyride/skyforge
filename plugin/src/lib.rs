@@ -61,6 +61,8 @@ pub(crate) struct FaceState {
     pub kind: String,
     pub preset: String,
     pub rec: String,
+    pub scale: f32,
+    pub banks: String,
 }
 
 impl Default for FaceState {
@@ -72,6 +74,8 @@ impl Default for FaceState {
             kind: "free".to_string(),
             preset: "init".to_string(),
             rec: String::new(),
+            scale: 1.0,
+            banks: String::new(),
         }
     }
 }
