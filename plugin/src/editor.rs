@@ -3,7 +3,7 @@ use nih_plug::prelude::*;
 use nih_plug_webview::{HTMLSource, Key, WebViewEditor};
 use serde::Deserialize;
 use serde_json::json;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
 pub const FACE_W: u32 = 1100;
@@ -539,20 +539,53 @@ fn wyrms_json(bus: &crate::FaceBus) -> serde_json::Value {
     json!({ "type": "wyrms", "log": log })
 }
 
+fn persist_wyrms(params: &SkyForgeParams, bus: &crate::FaceBus) {
+    let Ok(live) = bus.wyrms.lock() else {
+        return;
+    };
+    if let Ok(mut saved) = params.wyrms.lock() {
+        *saved = live.clone();
+    }
+}
+
+fn load_wyrms(params: &SkyForgeParams, bus: &crate::FaceBus) {
+    let Ok(saved) = params.wyrms.lock() else {
+        return;
+    };
+    if saved.is_empty() {
+        return;
+    }
+    if let Ok(mut live) = bus.wyrms.lock() {
+        if live.is_empty() {
+            *live = saved.clone();
+        }
+    }
+}
+
+fn push_state(ctx: &nih_plug_webview::WindowHandler, params: &SkyForgeParams, bus: &crate::FaceBus, wyrms: bool) {
+    let _ = ctx.send_json(snapshot(params));
+    if wyrms {
+        let _ = ctx.send_json(wyrms_json(bus));
+    }
+}
+
 pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<crate::FaceBus>) -> Option<Box<dyn Editor>> {
     let face: &'static str = include_str!("face.html");
     let ready = Arc::new(AtomicBool::new(false));
+    let resync = Arc::new(AtomicBool::new(true));
+    let hydrate = Arc::new(AtomicU32::new(0));
     let editor = WebViewEditor::new(HTMLSource::String(face), (FACE_W, FACE_H))
         .with_background_color((0x4a, 0x3a, 0x62, 255))
         .with_developer_mode(false)
         .with_keyboard_handler(|event| event.key == Key::Escape)
+        .with_resync(resync.clone())
         .with_event_loop(move |ctx, setter, _window| {
             while let Ok(value) = ctx.next_event() {
                 match serde_json::from_value::<Action>(value) {
                     Ok(Action::Init) => {
                         ready.store(true, Ordering::Relaxed);
-                        let _ = ctx.send_json(snapshot(&params));
-                        let _ = ctx.send_json(wyrms_json(&bus));
+                        load_wyrms(&params, &bus);
+                        push_state(ctx, &params, &bus, true);
                     }
                     Ok(Action::Patch { params: patch }) => {
                         apply_patch(&setter, &params, patch);
@@ -619,12 +652,23 @@ pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<crate::FaceBus>) -> Op
                     Ok(Action::SaveChunk { data }) => save_chunk(&bus, &data),
                     Ok(Action::SaveEnd) => save_end(ctx, &bus),
                     Ok(Action::SaveWav { stem }) => save_wav(ctx, &bus, stem),
-                    Ok(action @ Action::WyrmKeep { .. }) => keep_wyrm(&bus, action),
+                    Ok(action @ Action::WyrmKeep { .. }) => {
+                        keep_wyrm(&bus, action);
+                        persist_wyrms(&params, &bus);
+                    }
                     Err(_) => {}
                 }
             }
             if !ready.load(Ordering::Relaxed) {
+                let n = hydrate.fetch_add(1, Ordering::Relaxed);
+                if n == 0 || n % 8 == 0 {
+                    load_wyrms(&params, &bus);
+                    push_state(ctx, &params, &bus, false);
+                }
                 return;
+            }
+            if resync.swap(false, Ordering::Relaxed) {
+                push_state(ctx, &params, &bus, true);
             }
             if pump_clip(ctx, &bus) {
                 return;

@@ -67,9 +67,9 @@ jobs:
 
             **Mac:** unzip into `~/Library/Audio/Plug-Ins/VST3/` then rescan.
 
-            Replace any older SkyForge VST (vst3-5 and earlier) with this one, then rescan.
-
             Hide or fold the window — knobs, Kind, Rack, trim, handle, and the last three Ear Wyrms stay. Open it again and the face comes back as you left it.
+
+            Replace any older SkyForge VST (vst3-11 and earlier) with this one, then rescan.
 
             Kind = Free uses the knobs. Earth / Water / Fire / Wind load that dragon character (Volume / Halloween / Aether still layer on top).
 

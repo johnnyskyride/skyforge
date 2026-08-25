@@ -4,7 +4,7 @@ use serde_json::Value;
 use std::{
     borrow::Cow,
     sync::{
-        atomic::{AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
         Arc,
     },
 };
@@ -26,6 +26,8 @@ type MouseHandler = dyn Fn(MouseEvent) -> EventStatus + Send + Sync;
 type CustomProtocolHandler =
     dyn Fn(&Request<Vec<u8>>) -> wry::Result<Response<Cow<'static, [u8]>>> + Send + Sync;
 
+static CTX_ID: AtomicU64 = AtomicU64::new(1);
+
 pub struct WebViewEditor {
     source: Arc<HTMLSource>,
     width: Arc<AtomicU32>,
@@ -36,6 +38,7 @@ pub struct WebViewEditor {
     custom_protocol: Option<(String, Arc<CustomProtocolHandler>)>,
     developer_mode: bool,
     background_color: (u8, u8, u8, u8),
+    resync: Arc<AtomicBool>,
 }
 
 pub enum HTMLSource {
@@ -57,6 +60,7 @@ impl WebViewEditor {
             keyboard_handler: Arc::new(|_| false),
             mouse_handler: Arc::new(|_| EventStatus::Ignored),
             custom_protocol: None,
+            resync: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -71,10 +75,10 @@ impl WebViewEditor {
             + 'static
             + Send
             + Sync,
-        {
-            self.custom_protocol = Some((name, Arc::new(handler)));
-            self
-        }
+    {
+        self.custom_protocol = Some((name, Arc::new(handler)));
+        self
+    }
 
     pub fn with_event_loop<F>(mut self, handler: F) -> Self
     where
@@ -102,6 +106,11 @@ impl WebViewEditor {
         F: Fn(MouseEvent) -> EventStatus + Send + Sync + 'static,
     {
         self.mouse_handler = Arc::new(handler);
+        self
+    }
+
+    pub fn with_resync(mut self, flag: Arc<AtomicBool>) -> Self {
+        self.resync = flag;
         self
     }
 }
@@ -206,14 +215,16 @@ impl Editor for WebViewEditor {
         let event_loop_handler = self.event_loop_handler.clone();
         let keyboard_handler = self.keyboard_handler.clone();
         let mouse_handler = self.mouse_handler.clone();
+        self.resync.store(true, Ordering::Relaxed);
 
         let window_handle = baseview::Window::open_parented(&parent, options, move |window| {
             let (events_sender, events_receiver) = unbounded();
 
             let mut udata = std::env::temp_dir();
-            udata.push(format!("skyforge-wv-{}", std::process::id()));
+            let cid = CTX_ID.fetch_add(1, Ordering::Relaxed);
+            udata.push(format!("skyforge-wv-{}-{}", std::process::id(), cid));
             let _ = std::fs::create_dir_all(&udata);
-            let mut web_context = WebContext::new(Some(udata));
+            let web_context = Box::leak(Box::new(WebContext::new(Some(udata))));
 
             let mut webview_builder = WebViewBuilder::new_as_child(window)
                 .with_bounds(wry::Rect {
@@ -224,7 +235,7 @@ impl Editor for WebViewEditor {
                 })
                 .with_accept_first_mouse(true)
                 .with_devtools(developer_mode)
-                .with_web_context(&mut web_context)
+                .with_web_context(web_context)
                 .with_initialization_script(include_str!("script.js"))
                 .with_ipc_handler(move |msg: String| {
                     if let Ok(json_value) = serde_json::from_str(&msg) {
@@ -273,7 +284,9 @@ impl Editor for WebViewEditor {
         false
     }
 
-    fn param_values_changed(&self) {}
+    fn param_values_changed(&self) {
+        self.resync.store(true, Ordering::Relaxed);
+    }
 
     fn param_value_changed(&self, _id: &str, _normalized_value: f32) {}
 

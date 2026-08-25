@@ -112,6 +112,8 @@ pub(crate) struct SkyForgeParams {
     pub aether: FloatParam,
     #[persist = "face"]
     pub face: Mutex<FaceState>,
+    #[persist = "wyrms"]
+    pub wyrms: Mutex<Vec<KeptWyrm>>,
 }
 
 
@@ -180,6 +182,7 @@ impl Default for SkyForgeParams {
             aether: FloatParam::new("Aether", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_smoother(SmoothingStyle::Linear(50.0)),
             face: Mutex::new(FaceState::default()),
+            wyrms: Mutex::new(Vec::new()),
         }
     }
 }
@@ -192,6 +195,7 @@ pub(crate) struct ClipDump {
     pub mode: String,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct KeptWyrm {
     pub id: String,
     pub epithet: String,
@@ -771,6 +775,11 @@ impl Plugin for SkyForge {
     ) -> bool {
         self.sr = buffer_config.sample_rate;
         self.alloc_delays(self.sr);
+        if let (Ok(saved), Ok(mut live)) = (self.params.wyrms.lock(), self.bus.wyrms.lock()) {
+            if live.is_empty() && !saved.is_empty() {
+                *live = saved.clone();
+            }
+        }
         true
     }
 

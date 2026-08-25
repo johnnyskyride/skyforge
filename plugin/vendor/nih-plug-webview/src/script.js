@@ -1,14 +1,26 @@
+window.__sfQ = window.__sfQ || [];
+
 window.sendToPlugin = function (msg) {
   try {
-    window.ipc.postMessage(JSON.stringify(msg));
+    if (window.ipc && window.ipc.postMessage) {
+      window.ipc.postMessage(JSON.stringify(msg));
+      return;
+    }
+  } catch (e) {}
+  try {
+    if (window.chrome && window.chrome.webview && window.chrome.webview.postMessage) {
+      window.chrome.webview.postMessage(JSON.stringify(msg));
+    }
   } catch (e) {}
 };
 
-window.onPluginMessage = function () {};
+window.onPluginMessage = function (msg) {
+  window.__sfQ.push(msg);
+};
 
 window.onPluginMessageInternal = function (msg) {
   try {
-    var json = JSON.parse(msg);
+    var json = typeof msg === "string" ? JSON.parse(msg) : msg;
     window.onPluginMessage && window.onPluginMessage(json);
   } catch (e) {}
 };
