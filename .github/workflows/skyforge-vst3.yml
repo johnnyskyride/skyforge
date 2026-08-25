@@ -55,7 +55,9 @@ jobs:
 
             Sound is native (bounce and freeze work).
 
-            The plugin window is the chassis. No extra pad, no rounded outer frame — Live's own title strip is the only chrome Ableton draws. The window hugs the piano. Trim is a tube in the bezel (Purple / Green / Plasma), not a glow behind the panel.
+            The plugin window is the chassis. No extra pad, no rounded outer frame — Live's own title strip is the only chrome Ableton draws. The window hugs the piano on Forge and Rack. Trim is a tube in the bezel (Purple / Green / Plasma), not a glow behind the panel.
+
+            Ear Wyrm shows **Processing** on the bottom-right plate while it cuts. When the take is ready it lands at the top without shoving the keys off the window.
 
             **Options** (header, next to the preset list):
             - Save / load your own presets (JSON). Saved takes also land in Downloads.
@@ -76,7 +78,7 @@ jobs:
 
             Hide or fold the window — knobs, Kind, Rack, trim, handle, size, your presets, and the last three Ear Wyrms stay. Open it again and the face comes back as you left it.
 
-            Replace any older SkyForge VST (vst3-13 and earlier) with this one, then rescan.
+            Replace any older SkyForge VST (vst3-14 and earlier) with this one, then rescan.
 
             Kind = Free uses the knobs. Earth / Water / Fire / Wind load that dragon character (Volume / Halloween / Aether still layer on top).
 

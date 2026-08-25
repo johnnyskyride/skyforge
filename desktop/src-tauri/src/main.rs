@@ -51,8 +51,8 @@ fn main() {
             let url = load_url(app.handle());
             WebviewWindowBuilder::new(app, "main", url)
                 .title("SkyForge")
-                .inner_size(1100.0, 616.0)
-                .min_inner_size(720.0, 500.0)
+                .inner_size(1100.0, 648.0)
+                .min_inner_size(720.0, 520.0)
                 .resizable(true)
                 .center()
                 .build()?;

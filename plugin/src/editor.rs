@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
 pub const FACE_W: u32 = 1100;
-pub const FACE_H: u32 = 576;
+pub const FACE_H: u32 = 608;
 const CLIP_CHUNK: usize = 24_576;
 
 #[derive(Deserialize)]
