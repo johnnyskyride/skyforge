@@ -27,9 +27,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libwebkit2gtk-4.0-dev libjavascriptcoregtk-4.1-dev libjavascriptcoregtk-4.0-dev libsoup2.4-dev libx11-xcb-dev libxcb1-dev libgl1-mesa-dev libxcursor-dev libxkbcommon-dev libx11-dev libxrandr-dev libxi-dev libxcb-xfixes0-dev
+      - name: Fetch Rust crates
+        working-directory: plugin
+        run: cargo fetch --locked
+      - name: Stamp VST3 MIDI so Live records it
+        working-directory: plugin
+        run: python patch-nih-midi.py
       - name: Build plugin
         working-directory: plugin
-        run: cargo build --release --locked
+        run: cargo build --release --locked --offline
       - name: Bundle VST3
         working-directory: plugin
         run: python bundle.py
@@ -68,11 +74,11 @@ jobs:
 
             **Bounce** writes a WAV of the native take into **Downloads** (or Documents/SkyForge if Downloads is locked). Bounce is not capped at 30 seconds — up to ten minutes. **MIDI** dumps the notes there too. Ear Wyrm video is **MP4** when the face can encode it; WAV/MP3 land in Downloads from the face.
 
-            Put SkyForge on a **MIDI track**. Arm the track. Play.
+            Put SkyForge on a **MIDI track**. Delete any older SkyForge from the rack first, then drag this build in (Live caches the old MIDI layout). Arm the track. Play.
 
-            **Recording in Live:** arm the SkyForge track and hit record. Play from a MIDI controller, or Live's computer MIDI keyboard (the piano icon in Live's control bar). SkyForge no longer grabs the controller for itself, so Live writes the notes.
-
-            Playing the keys on SkyForge's face still sounds. Those notes also leave as MIDI out. To capture *those* keys into a clip, make a second MIDI track → MIDI From: the SkyForge track → pick SkyForge → Monitor In → arm and record.
+            **Recording notes into a clip:**
+            - **MIDI controller or Live's computer MIDI keyboard** (piano icon in Live's control bar): arm the SkyForge track, hit record, play. Notes should land in the clip.
+            - **Keys on SkyForge's face:** those notes leave as MIDI out. Make a second MIDI track → MIDI From: the SkyForge track → pick **SkyForge** (not Post FX) → Monitor In → arm that second track and record. MIDI To can point back at the SkyForge track if you want the clip to drive the synth.
 
             To print audio instead of MIDI: new audio track → Audio From: the SkyForge track → arm and record, or Freeze/Flatten.
 
@@ -84,7 +90,7 @@ jobs:
 
             Hide or fold the window — knobs, Kind, Rack, trim, handle, size, your presets, and the last three Ear Wyrms stay. Open it again and the face comes back as you left it. The Wyrms strip keeps three takes; a new cut does not wipe the last two.
 
-            Replace any older SkyForge VST (vst3-17 and earlier) with this one, then rescan.
+            Replace any older SkyForge VST (vst3-18 and earlier) with this one, then rescan. Remove the old device from the track and add the new one.
 
             Kind = Free uses the knobs. Earth / Water / Fire / Wind load that dragon character (Volume / Halloween / Aether still layer on top).
 
