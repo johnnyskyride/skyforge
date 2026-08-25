@@ -33,9 +33,9 @@ then Live → Settings → Plug-Ins → enable VST3 system folders → **Rescan*
 
 The Live plugin window is the same SkyForge as the HTML and the app — Forge and Rack skins, knobs, keys, Call, trim glow. Kind = Free uses the knobs. Earth / Water / Fire / Wind load that dragon character. Volume, Halloween, and Aether still layer on top.
 
-Hide or fold the window — the instrument stays. Knobs, Kind, Rack, trim, and your take come back when you open it again.
+Hide or fold the window — knobs, Kind, Rack, trim, and the last three Ear Wyrms come back when you open it again.
 
-**Ear Wyrm:** press Ear Wyrm, play, press Stop, wait for Cut…. The take is the native instrument. **Bounce** and **MIDI** land in your Downloads folder (same for wyrm video / WAV / MP3 from the face). Hide or fold the window — the instrument stays. Replace older Live builds with the latest zip, then rescan.
+**Ear Wyrm:** press Ear Wyrm, play, press Stop, wait for Cut…. The take is the native instrument. **Bounce** and **MIDI** land in your Downloads folder (same for wyrm video / WAV / MP3 from the face). Replace older Live builds with the latest zip, then rescan.
 
 The HTML file and the desktop app stay. This plugin is the Live twin of the same instrument.
 

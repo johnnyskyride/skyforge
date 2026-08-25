@@ -31,6 +31,15 @@ enum Action {
     SaveChunk { data: String },
     SaveEnd,
     SaveWav { stem: Option<String> },
+    WyrmKeep {
+        id: Option<String>,
+        epithet: Option<String>,
+        element: Option<String>,
+        at: Option<u64>,
+        name: Option<String>,
+        thumb: Option<String>,
+        stem: Option<String>,
+    },
 }
 
 #[derive(Deserialize)]
@@ -422,7 +431,13 @@ fn save_end(ctx: &nih_plug_webview::WindowHandler, bus: &crate::FaceBus) {
 }
 
 fn save_wav(ctx: &nih_plug_webview::WindowHandler, bus: &crate::FaceBus, stem: Option<String>) {
-    let taken = bus.last_pcm.lock().ok().and_then(|g| g.clone());
+    let stem_key = stem.clone().unwrap_or_default();
+    let from_wyrm = bus.wyrms.lock().ok().and_then(|log| {
+        log.iter()
+            .find(|w| !stem_key.is_empty() && (w.stem == stem_key || w.name == stem_key))
+            .map(|w| (w.sr, w.pcm.clone()))
+    });
+    let taken = from_wyrm.or_else(|| bus.last_pcm.lock().ok().and_then(|g| g.clone()));
     let Some((sr, pcm)) = taken else {
         let _ = ctx.send_json(saved_json(false, "skyforge-bounce.wav"));
         return;
@@ -449,6 +464,81 @@ fn save_wav(ctx: &nih_plug_webview::WindowHandler, bus: &crate::FaceBus, stem: O
     }
 }
 
+fn clean_short(s: &str, n: usize) -> String {
+    s.chars()
+        .filter(|c| *c >= ' ' && *c != '\u{7f}')
+        .take(n)
+        .collect()
+}
+
+fn keep_wyrm(bus: &crate::FaceBus, action: Action) {
+    let Action::WyrmKeep {
+        id,
+        epithet,
+        element,
+        at,
+        name,
+        thumb,
+        stem,
+    } = action
+    else {
+        return;
+    };
+    let id = clean_short(id.as_deref().unwrap_or(""), 40);
+    if id.is_empty() {
+        return;
+    }
+    let (sr, pcm) = bus
+        .last_pcm
+        .lock()
+        .ok()
+        .and_then(|g| g.clone())
+        .unwrap_or((44_100, Vec::new()));
+    let wyrm = crate::KeptWyrm {
+        id: id.clone(),
+        epithet: clean_short(epithet.as_deref().unwrap_or("Wyrm"), 48),
+        element: clean_short(element.as_deref().unwrap_or("FIRE"), 12),
+        at: at.unwrap_or(0),
+        name: clean_short(name.as_deref().unwrap_or("ear-wyrm.mp4"), 80),
+        thumb: thumb
+            .unwrap_or_default()
+            .chars()
+            .take(120_000)
+            .collect(),
+        stem: clean_short(stem.as_deref().unwrap_or("ear-wyrm"), 80),
+        sr,
+        pcm,
+    };
+    if let Ok(mut log) = bus.wyrms.lock() {
+        log.retain(|w| w.id != id);
+        log.insert(0, wyrm);
+        log.truncate(3);
+    }
+}
+
+fn wyrms_json(bus: &crate::FaceBus) -> serde_json::Value {
+    let log = bus
+        .wyrms
+        .lock()
+        .map(|log| {
+            log.iter()
+                .map(|w| {
+                    json!({
+                        "id": w.id,
+                        "epithet": w.epithet,
+                        "element": w.element,
+                        "at": w.at,
+                        "name": w.name,
+                        "thumb": w.thumb,
+                        "stem": w.stem,
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    json!({ "type": "wyrms", "log": log })
+}
+
 pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<crate::FaceBus>) -> Option<Box<dyn Editor>> {
     let face: &'static str = include_str!("face.html");
     let ready = Arc::new(AtomicBool::new(false));
@@ -462,6 +552,7 @@ pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<crate::FaceBus>) -> Op
                     Ok(Action::Init) => {
                         ready.store(true, Ordering::Relaxed);
                         let _ = ctx.send_json(snapshot(&params));
+                        let _ = ctx.send_json(wyrms_json(&bus));
                     }
                     Ok(Action::Patch { params: patch }) => {
                         apply_patch(&setter, &params, patch);
@@ -528,6 +619,7 @@ pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<crate::FaceBus>) -> Op
                     Ok(Action::SaveChunk { data }) => save_chunk(&bus, &data),
                     Ok(Action::SaveEnd) => save_end(ctx, &bus),
                     Ok(Action::SaveWav { stem }) => save_wav(ctx, &bus, stem),
+                    Ok(action @ Action::WyrmKeep { .. }) => keep_wyrm(&bus, action),
                     Err(_) => {}
                 }
             }

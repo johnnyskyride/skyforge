@@ -192,6 +192,18 @@ pub(crate) struct ClipDump {
     pub mode: String,
 }
 
+pub(crate) struct KeptWyrm {
+    pub id: String,
+    pub epithet: String,
+    pub element: String,
+    pub at: u64,
+    pub name: String,
+    pub thumb: String,
+    pub stem: String,
+    pub sr: u32,
+    pub pcm: Vec<i16>,
+}
+
 pub(crate) struct FaceBus {
     pub rms: AtomicU32,
     pub scope: Mutex<[f32; 192]>,
@@ -207,6 +219,7 @@ pub(crate) struct FaceBus {
     pub midi_t: AtomicU32,
     pub last_pcm: Mutex<Option<(u32, Vec<i16>)>>,
     pub save: Mutex<Option<(String, Vec<u8>)>>,
+    pub wyrms: Mutex<Vec<KeptWyrm>>,
 }
 
 impl FaceBus {
@@ -226,6 +239,7 @@ impl FaceBus {
             midi_t: AtomicU32::new(0),
             last_pcm: Mutex::new(None),
             save: Mutex::new(None),
+            wyrms: Mutex::new(Vec::with_capacity(3)),
         })
     }
 }
