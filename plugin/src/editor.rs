@@ -581,7 +581,20 @@ fn persist_wyrms(params: &SkyForgeParams, bus: &crate::FaceBus) {
         return;
     };
     if let Ok(mut saved) = params.wyrms.lock() {
-        *saved = live.clone();
+        *saved = live
+            .iter()
+            .map(|w| crate::KeptWyrm {
+                id: w.id.clone(),
+                epithet: w.epithet.clone(),
+                element: w.element.clone(),
+                at: w.at,
+                name: w.name.clone(),
+                thumb: w.thumb.clone(),
+                stem: w.stem.clone(),
+                sr: w.sr,
+                pcm: Vec::new(),
+            })
+            .collect();
     }
 }
 
@@ -707,6 +720,7 @@ pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<crate::FaceBus>) -> Op
                     Ok(action @ Action::WyrmKeep { .. }) => {
                         keep_wyrm(&bus, action);
                         persist_wyrms(&params, &bus);
+                        let _ = ctx.send_json(wyrms_json(&bus));
                     }
                     Err(_) => {}
                 }

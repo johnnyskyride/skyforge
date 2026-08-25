@@ -209,6 +209,7 @@ pub(crate) struct KeptWyrm {
     pub thumb: String,
     pub stem: String,
     pub sr: u32,
+    #[serde(default, skip_serializing)]
     pub pcm: Vec<i16>,
 }
 

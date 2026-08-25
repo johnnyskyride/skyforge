@@ -76,9 +76,9 @@ jobs:
 
             **Mac:** unzip into `~/Library/Audio/Plug-Ins/VST3/` then rescan.
 
-            Hide or fold the window — knobs, Kind, Rack, trim, handle, size, your presets, and the last three Ear Wyrms stay. Open it again and the face comes back as you left it.
+            Hide or fold the window — knobs, Kind, Rack, trim, handle, size, your presets, and the last three Ear Wyrms stay. Open it again and the face comes back as you left it. The Wyrms strip keeps three takes; a new cut does not wipe the last two.
 
-            Replace any older SkyForge VST (vst3-14 and earlier) with this one, then rescan.
+            Replace any older SkyForge VST (vst3-15 and earlier) with this one, then rescan.
 
             Kind = Free uses the knobs. Earth / Water / Fire / Wind load that dragon character (Volume / Halloween / Aether still layer on top).
 
