@@ -221,6 +221,8 @@ pub(crate) struct FaceBus {
     pub inbox: Mutex<Vec<(u8, bool, f32)>>,
     pub clip_on: AtomicBool,
     pub clip_sr: AtomicU32,
+    pub clip_max_sec: AtomicU32,
+    pub clip_full: AtomicBool,
     pub clip: Mutex<Vec<f32>>,
     pub clip_mode: Mutex<String>,
     pub dump: Mutex<Option<ClipDump>>,
@@ -241,6 +243,8 @@ impl FaceBus {
             inbox: Mutex::new(Vec::with_capacity(32)),
             clip_on: AtomicBool::new(false),
             clip_sr: AtomicU32::new(44_100),
+            clip_max_sec: AtomicU32::new(30),
+            clip_full: AtomicBool::new(false),
             clip: Mutex::new(Vec::new()),
             clip_mode: Mutex::new(String::new()),
             dump: Mutex::new(None),
@@ -1086,15 +1090,18 @@ impl Plugin for SkyForge {
         self.bus.midi_t.fetch_add(len as u32, Ordering::Relaxed);
         if rec {
             if let Ok(mut buf) = self.bus.clip.try_lock() {
-                let max = (30.0 * sr) as usize;
+                let max_sec = self.bus.clip_max_sec.load(Ordering::Relaxed).max(30) as f32;
+                let max = (max_sec * sr) as usize;
                 let room = max.saturating_sub(buf.len());
                 if room == 0 {
                     self.bus.clip_on.store(false, Ordering::Relaxed);
+                    self.bus.clip_full.store(true, Ordering::Relaxed);
                 } else {
                     let n = rec_local.len().min(room);
                     buf.extend_from_slice(&rec_local[..n]);
                     if buf.len() >= max {
                         self.bus.clip_on.store(false, Ordering::Relaxed);
+                        self.bus.clip_full.store(true, Ordering::Relaxed);
                     }
                 }
             }

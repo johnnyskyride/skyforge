@@ -334,12 +334,16 @@ fn b64(data: &[u8]) -> String {
 
 fn clip_start(bus: &crate::FaceBus, mode: &str) {
     bus.clip_on.store(false, Ordering::Relaxed);
+    bus.clip_full.store(false, Ordering::Relaxed);
     if let Ok(mut dump) = bus.dump.lock() {
         *dump = None;
     }
+    let bounce = mode == "bounce";
+    let secs: u32 = if bounce { 600 } else { 30 };
+    bus.clip_max_sec.store(secs, Ordering::Relaxed);
     if let Ok(mut buf) = bus.clip.lock() {
         buf.clear();
-        buf.reserve(48_000 * 30);
+        buf.reserve(48_000 * secs as usize);
     }
     if let Ok(mut m) = bus.clip_mode.lock() {
         *m = mode.to_string();
@@ -425,7 +429,7 @@ fn pump_midi(ctx: &nih_plug_webview::WindowHandler, bus: &crate::FaceBus) {
     let name = format!("skyforge-clip-{}.mid", crate::files::stamp());
     match crate::files::write_midi(&name, &events) {
         Ok(path) => {
-            let _ = ctx.send_json(saved_json(true, &crate::files::file_name(&path)));
+            let _ = ctx.send_json(saved_json(true, &crate::files::describe(&path)));
         }
         Err(_) => {
             let _ = ctx.send_json(saved_json(false, &name));
@@ -459,7 +463,7 @@ fn save_end(ctx: &nih_plug_webview::WindowHandler, bus: &crate::FaceBus) {
     }
     match crate::files::write_download(&name, &bytes) {
         Ok(path) => {
-            let _ = ctx.send_json(saved_json(true, &crate::files::file_name(&path)));
+            let _ = ctx.send_json(saved_json(true, &crate::files::describe(&path)));
         }
         Err(_) => {
             let _ = ctx.send_json(saved_json(false, &name));
@@ -493,10 +497,39 @@ fn save_wav(ctx: &nih_plug_webview::WindowHandler, bus: &crate::FaceBus, stem: O
     }
     match crate::files::write_wav(&name, &pcm, sr) {
         Ok(path) => {
-            let _ = ctx.send_json(saved_json(true, &crate::files::file_name(&path)));
+            let _ = ctx.send_json(saved_json(true, &crate::files::describe(&path)));
         }
         Err(_) => {
             let _ = ctx.send_json(saved_json(false, &name));
+        }
+    }
+}
+
+fn finish_bounce(
+    ctx: &nih_plug_webview::WindowHandler,
+    bus: &crate::FaceBus,
+    sr: u32,
+    pcm: Vec<i16>,
+) {
+    let name = format!("skyforge-bounce-{}.wav", crate::files::stamp());
+    if (pcm.len() as f32) < sr as f32 * 0.15 {
+        let _ = ctx.send_json(saved_json(false, &name));
+        return;
+    }
+    match crate::files::write_wav(&name, &pcm, sr) {
+        Ok(path) => {
+            let _ = ctx.send_json(saved_json(true, &crate::files::describe(&path)));
+        }
+        Err(_) => {
+            if let Ok(mut dump) = bus.dump.lock() {
+                *dump = Some(crate::ClipDump {
+                    sr,
+                    pcm,
+                    sent: 0,
+                    begun: false,
+                    mode: "bounce".to_string(),
+                });
+            }
         }
     }
 }
@@ -685,23 +718,7 @@ pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<crate::FaceBus>) -> Op
                         }
                         let (mode, sr, pcm) = clip_stop(&bus);
                         if mode == "bounce" {
-                            let name = format!("skyforge-bounce-{}.wav", crate::files::stamp());
-                            let long_enough = (pcm.len() as f32) >= sr as f32 * 0.15;
-                            if long_enough {
-                                match crate::files::write_wav(&name, &pcm, sr) {
-                                    Ok(path) => {
-                                        let _ = ctx.send_json(saved_json(
-                                            true,
-                                            &crate::files::file_name(&path),
-                                        ));
-                                    }
-                                    Err(_) => {
-                                        let _ = ctx.send_json(saved_json(false, &name));
-                                    }
-                                }
-                            } else {
-                                let _ = ctx.send_json(saved_json(false, &name));
-                            }
+                            finish_bounce(ctx, &bus, sr, pcm);
                         } else if let Ok(mut dump) = bus.dump.lock() {
                             *dump = Some(crate::ClipDump {
                                 sr,
@@ -738,6 +755,32 @@ pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<crate::FaceBus>) -> Op
             }
             if pump_clip(ctx, &bus) {
                 return;
+            }
+            if bus.clip_full.swap(false, Ordering::Relaxed) {
+                let still = bus
+                    .clip_mode
+                    .lock()
+                    .map(|m| !m.is_empty())
+                    .unwrap_or(false);
+                if still {
+                    if let Ok(mut face) = params.face.lock() {
+                        face.rec.clear();
+                    }
+                    let (mode, sr, pcm) = clip_stop(&bus);
+                    if mode == "bounce" {
+                        finish_bounce(ctx, &bus, sr, pcm);
+                    } else if let Ok(mut dump) = bus.dump.lock() {
+                        *dump = Some(crate::ClipDump {
+                            sr,
+                            pcm,
+                            sent: 0,
+                            begun: false,
+                            mode,
+                        });
+                    }
+                    let _ = ctx.send_json(snapshot(&params));
+                    return;
+                }
             }
 
             let rms = f32::from_bits(bus.rms.load(Ordering::Relaxed));

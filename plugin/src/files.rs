@@ -1,10 +1,33 @@
 use std::path::{Path, PathBuf};
 
+fn writable_dir(p: &Path) -> bool {
+    if std::fs::create_dir_all(p).is_err() {
+        return false;
+    }
+    let probe = p.join(".skyforge-write");
+    match std::fs::write(&probe, b"ok") {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
 pub fn downloads_dir() -> PathBuf {
-    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"));
-    if let Some(home) = home {
-        let p = PathBuf::from(home).join("Downloads");
-        if p.is_dir() {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
+        let home = PathBuf::from(home);
+        candidates.push(home.join("Downloads"));
+        candidates.push(home.join("Documents").join("SkyForge"));
+        candidates.push(home.join("Desktop"));
+    }
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        candidates.push(PathBuf::from(local).join("SkyForge"));
+    }
+    candidates.push(std::env::temp_dir().join("SkyForge"));
+    for p in candidates {
+        if writable_dir(&p) {
             return p;
         }
     }
@@ -48,6 +71,20 @@ pub fn file_name(path: &Path) -> String {
         .and_then(|s| s.to_str())
         .unwrap_or("skyforge.bin")
         .to_string()
+}
+
+pub fn describe(path: &Path) -> String {
+    let folder = path
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    let file = file_name(path);
+    if folder.is_empty() {
+        file
+    } else {
+        format!("{folder} / {file}")
+    }
 }
 
 pub fn write_wav(name: &str, pcm: &[i16], sr: u32) -> Result<PathBuf, String> {

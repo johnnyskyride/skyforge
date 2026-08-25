@@ -66,7 +66,7 @@ jobs:
 
             **Ear Wyrm works in Live now.** Press **Ear Wyrm**, play, press **Stop**, wait for **Cut…**. The take is the native instrument, then the clip is cut on the face. Play at least a beat — a tap with no notes will not cut a wyrm.
 
-            **Bounce** writes a WAV of the native take into **Downloads**. **MIDI** dumps the notes there too. Ear Wyrm video and WAV/MP3 land in Downloads from the face.
+            **Bounce** writes a WAV of the native take into **Downloads** (or Documents/SkyForge if Downloads is locked). Bounce is not capped at 30 seconds — up to ten minutes. **MIDI** dumps the notes there too. Ear Wyrm video is **MP4** when the face can encode it; WAV/MP3 land in Downloads from the face.
 
             Put SkyForge on a **MIDI track**. Arm the track. Play.
 
@@ -84,7 +84,7 @@ jobs:
 
             Hide or fold the window — knobs, Kind, Rack, trim, handle, size, your presets, and the last three Ear Wyrms stay. Open it again and the face comes back as you left it. The Wyrms strip keeps three takes; a new cut does not wipe the last two.
 
-            Replace any older SkyForge VST (vst3-16 and earlier) with this one, then rescan.
+            Replace any older SkyForge VST (vst3-17 and earlier) with this one, then rescan.
 
             Kind = Free uses the knobs. Earth / Water / Fire / Wind load that dragon character (Volume / Halloween / Aether still layer on top).
 
