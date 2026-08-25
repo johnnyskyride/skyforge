@@ -759,6 +759,7 @@ impl Plugin for SkyForge {
     }];
 
     const MIDI_INPUT: MidiConfig = MidiConfig::Basic;
+    const MIDI_OUTPUT: MidiConfig = MidiConfig::Basic;
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
 
     type SysExMessage = ();
@@ -822,8 +823,22 @@ impl Plugin for SkyForge {
         for (note, on, vel) in incoming {
             if on {
                 self.note_on(note, vel);
+                context.send_event(NoteEvent::NoteOn {
+                    timing: 0,
+                    voice_id: None,
+                    channel: 0,
+                    note,
+                    velocity: vel.clamp(0.0, 1.0),
+                });
             } else {
                 self.note_off(note);
+                context.send_event(NoteEvent::NoteOff {
+                    timing: 0,
+                    voice_id: None,
+                    channel: 0,
+                    note,
+                    velocity: 0.0,
+                });
             }
         }
 
@@ -840,8 +855,38 @@ impl Plugin for SkyForge {
                     break;
                 }
                 match event {
-                    NoteEvent::NoteOn { note, velocity, .. } => self.note_on(note, velocity),
-                    NoteEvent::NoteOff { note, .. } => self.note_off(note),
+                    NoteEvent::NoteOn {
+                        timing,
+                        voice_id,
+                        channel,
+                        note,
+                        velocity,
+                    } => {
+                        self.note_on(note, velocity);
+                        context.send_event(NoteEvent::NoteOn {
+                            timing,
+                            voice_id,
+                            channel,
+                            note,
+                            velocity,
+                        });
+                    }
+                    NoteEvent::NoteOff {
+                        timing,
+                        voice_id,
+                        channel,
+                        note,
+                        velocity,
+                    } => {
+                        self.note_off(note);
+                        context.send_event(NoteEvent::NoteOff {
+                            timing,
+                            voice_id,
+                            channel,
+                            note,
+                            velocity,
+                        });
+                    }
                     NoteEvent::Choke { .. } => self.panic(),
                     _ => (),
                 }
