@@ -776,7 +776,7 @@ impl Plugin for SkyForge {
     }];
 
     const MIDI_INPUT: MidiConfig = MidiConfig::MidiCCs;
-    const MIDI_OUTPUT: MidiConfig = MidiConfig::MidiCCs;
+    const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
 
     type SysExMessage = ();
@@ -845,22 +845,8 @@ impl Plugin for SkyForge {
                     gui_on[note as usize] = true;
                 }
                 self.note_on(note, vel);
-                context.send_event(NoteEvent::NoteOn {
-                    timing: 0,
-                    voice_id: Some(note as i32),
-                    channel: 0,
-                    note,
-                    velocity: vel.clamp(0.0, 1.0),
-                });
             } else {
                 self.note_off(note);
-                context.send_event(NoteEvent::NoteOff {
-                    timing: 0,
-                    voice_id: Some(note as i32),
-                    channel: 0,
-                    note,
-                    velocity: 0.0,
-                });
             }
         }
 
