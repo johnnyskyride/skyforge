@@ -76,10 +76,9 @@ jobs:
 
             Put SkyForge on a **MIDI track**. Delete any older SkyForge from the rack first, then drag this build in (Live caches the old MIDI layout). Arm the track. Play.
 
-            **Recording notes into a clip:** Live records MIDI that hits the track.
-            - **Computer keyboard:** turn on Live's computer MIDI keyboard — the **piano icon** in Live's control bar (it lights up). Arm the SkyForge track, hit Record, play Z/X/C/V… same layout as Live. Click a SkyForge knob if you want, then type — the face gives keys back to Live so the clip fills.
+            **Computer keyboard:** click the SkyForge window, then play Z/X/C/V (same layout as Live). The synth should sound. To write those notes into a clip, arm the track, hit Record, play. If the clip is still empty, set that track's MIDI From to **SkyForge** (the plugin), Monitor In, and record again.
             - **MIDI controller:** Live → Settings → MIDI → your device → **Track** on. Arm, Record, play.
-            - Clicking SkyForge's on-screen piano is preview only.
+            - Clicking SkyForge's on-screen piano is preview; computer keys are the playable keyboard.
 
             To print audio instead of MIDI: new audio track → Audio From: the SkyForge track → arm and record, or Freeze/Flatten.
 
@@ -91,7 +90,7 @@ jobs:
 
             Hide or fold the window — knobs, Kind, Rack, trim, handle, size, your presets, and the last three Ear Wyrms stay. Open it again and the face comes back as you left it. The Wyrms strip keeps three takes; a new cut does not wipe the last two.
 
-            Replace any older SkyForge VST (vst3-22 and earlier) with this one, then rescan. Remove the old device from the track and add the new one.
+            Replace any older SkyForge VST (vst3-24 and earlier) with this one, then rescan. Remove the old device from the track and add the new one.
 
             Kind = Free uses the knobs. Earth / Water / Fire / Wind load that dragon character (Volume / Halloween / Aether still layer on top).
 
