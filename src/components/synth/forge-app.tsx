@@ -65,6 +65,16 @@ const SKIN_KEY = "skyforge.skin";
 const TRIM_KEY = "skyforge.trim";
 type ChassisSkin = "forge" | "rack";
 
+function formatInterval(v: number): string {
+  const n = Math.round(v);
+  if (n === 0) return "uni";
+  if (n === 7) return "5th";
+  if (n === 5) return "4th";
+  if (n === 12) return "+oct";
+  if (n === -12) return "-oct";
+  return n > 0 ? `+${n}` : `${n}`;
+}
+
 function downloadBlob(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -1251,6 +1261,30 @@ export function ForgeApp() {
                 format={(v) => `${Math.round(v)}`}
                 defaultValue={DEFAULT_PARAMS.unison}
                 onChange={(unison) => patch({ unison: Math.max(1, Math.min(3, Math.round(unison))) })}
+              />
+              <Knob
+                compact
+                tone="pearl"
+                label="Osc 2"
+                value={params.twin}
+                min={PARAM_RANGE.twin.min}
+                max={PARAM_RANGE.twin.max}
+                format={(v) => (v < 0.01 ? "off" : `${Math.round(v * 100)}`)}
+                defaultValue={DEFAULT_PARAMS.twin}
+                onChange={(twin) => patch({ twin })}
+              />
+              <Knob
+                compact
+                tone="pearl"
+                label="Tune"
+                value={params.twinInterval}
+                min={PARAM_RANGE.twinInterval.min}
+                max={PARAM_RANGE.twinInterval.max}
+                format={formatInterval}
+                defaultValue={DEFAULT_PARAMS.twinInterval}
+                onChange={(twinInterval) =>
+                  patch({ twinInterval: Math.max(-24, Math.min(24, Math.round(twinInterval))) })
+                }
               />
               <div className="ml-4 flex shrink-0 gap-1 sm:ml-6 sm:gap-2">
                 <Knob

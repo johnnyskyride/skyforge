@@ -119,6 +119,10 @@ pub(crate) struct SkyForgeParams {
     pub waters: FloatParam,
     #[id = "aether"]
     pub aether: FloatParam,
+    #[id = "twin"]
+    pub twin: FloatParam,
+    #[id = "tune"]
+    pub twin_interval: IntParam,
     #[persist = "face"]
     pub face: Mutex<FaceState>,
     #[persist = "wyrms"]
@@ -190,6 +194,9 @@ impl Default for SkyForgeParams {
                 .with_smoother(SmoothingStyle::Linear(50.0)),
             aether: FloatParam::new("Aether", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_smoother(SmoothingStyle::Linear(50.0)),
+            twin: FloatParam::new("Osc 2", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_smoother(SmoothingStyle::Linear(40.0)),
+            twin_interval: IntParam::new("Tune", 7, IntRange::Linear { min: -24, max: 24 }),
             face: Mutex::new(FaceState::default()),
             wyrms: Mutex::new(Vec::new()),
         }
@@ -596,6 +603,7 @@ struct Voice {
     ghost_phase: f32,
     ghost_b: f32,
     sub_phase: f32,
+    twin_phase: f32,
     env: f32,
     stage: EnvStage,
     age: u64,
@@ -612,6 +620,7 @@ impl Voice {
             ghost_phase: 0.0,
             ghost_b: 0.0,
             sub_phase: 0.0,
+            twin_phase: 0.0,
             env: 0.0,
             stage: EnvStage::Off,
             age: 0,
@@ -690,6 +699,15 @@ fn softsat(x: f32, drive: f32) -> f32 {
 
 fn cents_ratio(cents: f32) -> f32 {
     2.0f32.powf(cents / 1200.0)
+}
+
+fn twin_wave(kind: WaveKind) -> WaveKind {
+    match kind {
+        WaveKind::Saw | WaveKind::Pulse => WaveKind::Square,
+        WaveKind::Square => WaveKind::Saw,
+        WaveKind::Sine | WaveKind::Triangle => WaveKind::Saw,
+        WaveKind::Noise => WaveKind::Noise,
+    }
 }
 
 struct SkyForge {
@@ -809,6 +827,7 @@ impl SkyForge {
         v.ghost_phase = 0.0;
         v.ghost_b = 0.0;
         v.sub_phase = 0.0;
+        v.twin_phase = 0.0;
         v.env = 0.0001;
         v.stage = EnvStage::Attack;
         v.age = self.age;
@@ -1075,6 +1094,8 @@ impl Plugin for SkyForge {
             let h_knob = self.params.halloween.smoothed.next().clamp(0.0, 1.0);
             let t_knob = self.params.waters.smoothed.next().clamp(0.0, 1.0);
             let a_knob = self.params.aether.smoothed.next().clamp(0.0, 1.0);
+            let twin = self.params.twin.smoothed.next().clamp(0.0, 1.0);
+            let twin_sem = self.params.twin_interval.value().clamp(-24, 24);
             let h = match shape {
                 Some(s) => h_knob.max(s.halloween),
                 None => h_knob,
@@ -1136,6 +1157,17 @@ impl Plugin for SkyForge {
                     }
                 }
                 osc_sum *= uni_scale;
+
+                if twin > 0.008 && !matches!(wave, WaveKind::Noise) {
+                    let ratio = 2.0f32.powf(twin_sem as f32 / 12.0) * 1.0026;
+                    let tdt = (hz * ratio / sr).clamp(0.00001, 0.49);
+                    let tsig = osc(twin_wave(wave), v.twin_phase, tdt, 0.5, &mut self.noise);
+                    osc_sum = osc_sum * (1.0 - twin * 0.28) + tsig * twin * 0.82;
+                    v.twin_phase += tdt;
+                    if v.twin_phase >= 1.0 {
+                        v.twin_phase -= 1.0;
+                    }
+                }
 
                 if earth && !matches!(wave, WaveKind::Noise) {
                     let sdt = (hz * 0.5 / sr).clamp(0.00001, 0.49);

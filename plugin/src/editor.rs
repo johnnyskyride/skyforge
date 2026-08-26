@@ -69,6 +69,8 @@ struct JsParams {
     waters: Option<f32>,
     aether: Option<f32>,
     unison: Option<i32>,
+    twin: Option<f32>,
+    twin_interval: Option<i32>,
 }
 
 fn wave_from(s: &str) -> WaveKind {
@@ -171,6 +173,12 @@ fn apply_patch(setter: &ParamSetter, params: &SkyForgeParams, patch: JsParams) {
     }
     if let Some(v) = patch.aether {
         set_f(setter, &params.aether, v);
+    }
+    if let Some(v) = patch.twin {
+        set_f(setter, &params.twin, v.clamp(0.0, 1.0));
+    }
+    if let Some(v) = patch.twin_interval {
+        set_i(setter, &params.twin_interval, v.clamp(-24, 24));
     }
 }
 
@@ -332,6 +340,8 @@ fn snapshot(params: &SkyForgeParams) -> serde_json::Value {
             "waters": params.waters.value(),
             "aether": params.aether.value(),
             "unison": params.unison.value(),
+            "twin": params.twin.value(),
+            "twinInterval": params.twin_interval.value(),
         },
         "skin": face.skin,
         "trim": face.trim,

@@ -125,6 +125,8 @@ type Voice = {
   ghostGain?: GainNode;
   sub?: OscillatorNode;
   subGain?: GainNode;
+  twin?: OscillatorNode;
+  twinGain?: GainNode;
   filter: BiquadFilterNode;
   amp: GainNode;
   releasing: boolean;
@@ -554,6 +556,18 @@ export class SynthEngine {
       voice.driftGain?.gain.setTargetAtTime(4.2 + h * 28, now, 0.04);
       for (const g of voice.driftGains) g.gain.setTargetAtTime(4.2 + h * 28, now, 0.04);
       voice.ghostGain?.gain.setTargetAtTime(h * 0.16, now, 0.04);
+      if (voice.twinGain) {
+        voice.twinGain.gain.setTargetAtTime(this.twinMix() * 0.82, now, 0.04);
+      }
+      if (voice.twin && (partial.twinInterval !== undefined || partial.waveform !== undefined)) {
+        const sem = Math.max(-24, Math.min(24, Math.round(this.params.twinInterval)));
+        voice.twin.frequency.setTargetAtTime(
+          clamp(midiToFreq(voice.midi) * Math.pow(2, sem / 12), 20, this.ctx.sampleRate * 0.4),
+          now,
+          0.03,
+        );
+        voice.twin.type = this.twinWave();
+      }
       const oscs = [voice.osc, ...voice.unison];
       for (const o of oscs) {
         if (
@@ -669,6 +683,9 @@ export class SynthEngine {
       const sub = this.startSub(freq, filter);
       voice.sub = sub.osc;
       voice.subGain = sub.gain;
+      const twin = this.startTwin(freq, filter);
+      voice.twin = twin.osc;
+      voice.twinGain = twin.gain;
     }
     this.voices.set(midi, voice);
     this.midiLog.push({ t: now, type: "on", midi, vel });
@@ -1012,6 +1029,32 @@ export class SynthEngine {
     return { osc, gain };
   }
 
+  private twinWave(): OscillatorType {
+    const wave = this.params.waveform;
+    if (wave === "sawtooth" || wave === "pulse") return "square";
+    if (wave === "square") return "sawtooth";
+    return "sawtooth";
+  }
+
+  private twinMix(): number {
+    if (this.params.waveform === "noise") return 0;
+    return clamp(this.params.twin, 0, 1);
+  }
+
+  private startTwin(freq: number, dest: AudioNode): { osc: OscillatorNode; gain: GainNode } {
+    const osc = this.ctx.createOscillator();
+    osc.type = this.twinWave();
+    const sem = Math.max(-24, Math.min(24, Math.round(this.params.twinInterval)));
+    osc.frequency.value = freq * Math.pow(2, sem / 12);
+    osc.detune.value = 4.5;
+    const gain = this.ctx.createGain();
+    gain.gain.value = this.twinMix() * 0.82;
+    osc.connect(gain);
+    gain.connect(dest);
+    osc.start();
+    return { osc, gain };
+  }
+
   private stealOldest(now: number) {
     let oldest: Voice | undefined;
     for (const v of this.voices.values()) {
@@ -1032,6 +1075,7 @@ export class SynthEngine {
       for (const d of voice.drifts) d.stop(now + 0.03);
       voice.ghost?.stop(now + 0.03);
       voice.sub?.stop(now + 0.03);
+      voice.twin?.stop(now + 0.03);
     } catch {
       /* already stopped */
     }
@@ -1049,6 +1093,8 @@ export class SynthEngine {
         voice.ghostGain?.disconnect();
         voice.sub?.disconnect();
         voice.subGain?.disconnect();
+        voice.twin?.disconnect();
+        voice.twinGain?.disconnect();
       } catch {
         /* noop */
       }
