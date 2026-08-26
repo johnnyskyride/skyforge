@@ -790,18 +790,24 @@ pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<crate::FaceBus>) -> Op
                     Ok(Action::ShareX { name, text, url }) => {
                         let name = name.unwrap_or_default();
                         let text = text.unwrap_or_default();
-                        let shown = {
+                        let ok = {
                             #[cfg(windows)]
                             {
-                                crate::share_win::share(window, &bus, &name, &text)
+                                use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
+                                match window.raw_window_handle() {
+                                    RawWindowHandle::Win32(h) => {
+                                        let hwnd = h.hwnd as isize;
+                                        hwnd != 0 && crate::share_win::share(hwnd, &bus, &name, &text)
+                                    }
+                                    _ => false,
+                                }
                             }
                             #[cfg(not(windows))]
                             {
-                                let _ = (&name, &text, window);
                                 false
                             }
                         };
-                        if !shown {
+                        if !ok {
                             if let Some(url) = url {
                                 open_in_browser(&url);
                             }
