@@ -1,7 +1,7 @@
 //! Hand computer keys to Ableton so Live's own keyboard writes the clip.
 
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
-use windows::Win32::Foundation::{BOOL, HWND, LPARAM};
+use windows::Win32::Foundation::{BOOL, HWND, LPARAM, TRUE};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, SetFocus, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
     KEYEVENTF_KEYUP, VIRTUAL_KEY,
