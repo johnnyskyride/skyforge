@@ -10,8 +10,9 @@ mod files;
 mod midi_out;
 
 const MAX_VOICES: usize = 8;
-const HAUNT_SECS: f32 = 0.55;
-const WATER_SECS: f32 = 0.16;
+const HAUNT_SECS: f32 = 0.92;
+const WATER_SECS: f32 = 0.08;
+const WATER_ROOM_SECS: f32 = 0.24;
 
 #[derive(Enum, PartialEq, Clone, Copy)]
 pub(crate) enum WaveKind {
@@ -301,17 +302,17 @@ fn kind_shape(kind: Kind) -> Option<Shape> {
         Kind::Water => Shape {
             wave: WaveKind::Sine,
             filter: FilterKind::Lowpass,
-            cutoff: 2400.0,
-            reso: 0.7,
-            attack: 0.1,
-            decay: 0.36,
-            sustain: 0.86,
-            release: 0.75,
+            cutoff: 2680.0,
+            reso: 0.52,
+            attack: 0.12,
+            decay: 0.42,
+            sustain: 0.9,
+            release: 0.96,
             octave: 0,
             unison: 2,
-            waters: 0.42,
+            waters: 0.5,
             halloween: 0.0,
-            aether: 0.0,
+            aether: 0.07,
         },
         Kind::Fire => Shape {
             wave: WaveKind::Saw,
@@ -325,7 +326,7 @@ fn kind_shape(kind: Kind) -> Option<Shape> {
             octave: 0,
             unison: 1,
             waters: 0.0,
-            halloween: 0.22,
+            halloween: 0.28,
             aether: 0.0,
         },
         Kind::Wind => Shape {
@@ -341,7 +342,7 @@ fn kind_shape(kind: Kind) -> Option<Shape> {
             unison: 3,
             waters: 0.06,
             halloween: 0.0,
-            aether: 0.2,
+            aether: 0.22,
         },
     })
 }
@@ -423,6 +424,26 @@ impl Biquad {
         self.a2 = a2 / a0;
     }
 
+    fn set_highshelf(&mut self, cutoff: f32, gain_db: f32, sr: f32) {
+        let f = cutoff.clamp(20.0, sr * 0.45);
+        let w = std::f32::consts::TAU * f / sr;
+        let (sin, cos) = w.sin_cos();
+        let a = 10.0f32.powf(gain_db / 40.0);
+        let alpha = sin * std::f32::consts::FRAC_1_SQRT_2;
+        let two_sa = 2.0 * a.sqrt() * alpha;
+        let b0 = a * ((a + 1.0) + (a - 1.0) * cos + two_sa);
+        let b1 = -2.0 * a * ((a - 1.0) + (a + 1.0) * cos);
+        let b2 = a * ((a + 1.0) + (a - 1.0) * cos - two_sa);
+        let a0 = (a + 1.0) - (a - 1.0) * cos + two_sa;
+        let a1 = 2.0 * ((a - 1.0) - (a + 1.0) * cos);
+        let a2 = (a + 1.0) - (a - 1.0) * cos - two_sa;
+        self.b0 = b0 / a0;
+        self.b1 = b1 / a0;
+        self.b2 = b2 / a0;
+        self.a1 = a1 / a0;
+        self.a2 = a2 / a0;
+    }
+
     fn tick(&mut self, x: f32) -> f32 {
         let y = self.b0 * x + self.z1;
         self.z1 = self.b1 * x - self.a1 * y + self.z2;
@@ -485,44 +506,59 @@ impl DelayLine {
 
 struct Aether {
     held: f32,
+    prev: f32,
     phase: f32,
-    env: f32,
+    lp: Biquad,
+    hp: Biquad,
+    wow: f32,
 }
 
 impl Aether {
-    fn tick(&mut self, x: f32, amt: f32) -> f32 {
-        if !(amt.is_finite()) || amt < 0.008 {
-            return if x.is_finite() { x } else { 0.0 };
+    fn new() -> Self {
+        Self {
+            held: 0.0,
+            prev: 0.0,
+            phase: 0.0,
+            lp: Biquad::silent(),
+            hp: Biquad::silent(),
+            wow: 0.0,
         }
-        let bits = 8.4 - amt * 5.1;
-        let levels = 2.0f32.powf(bits - 1.0).max(2.0);
-        let hold_n = 1.0 + amt * amt * 26.0;
+    }
+
+    fn tick(&mut self, x: f32, amt: f32, sr: f32, noise: &mut u32) -> f32 {
+        let x = if x.is_finite() { x } else { 0.0 };
+        if !(amt.is_finite()) || amt < 0.006 {
+            return x;
+        }
+        let hold_n = 1.0 + amt * amt * 13.5;
         self.phase += 1.0;
         if self.phase >= hold_n {
-            self.phase = 0.0;
-            self.held = (x * levels).round() / levels;
+            self.phase -= hold_n;
+            self.prev = self.held;
+            let bits = 13.2 - amt * 6.0;
+            let levels = 2.0f32.powf(bits - 1.0).max(8.0);
+            let dith = tpdf(noise) * (0.45 / levels);
+            self.held = ((x + dith) * levels).round() / levels;
             if !self.held.is_finite() {
                 self.held = 0.0;
             }
         }
-        let thresh = 0.01 + amt * 0.04;
-        if x.abs() > thresh {
-            self.env += (1.0 - self.env) * 0.28;
-        } else {
-            self.env += (0.0 - self.env) * (0.045 + amt * 0.08);
-        }
-        if !self.env.is_finite() {
-            self.env = 0.0;
-        }
-        let gate = 0.28 + 0.72 * self.env.clamp(0.0, 1.0);
-        let fold_n = 3.0 + amt * 5.0;
-        let fold = self.held - (self.held * fold_n).round() / fold_n;
-        let y = self.held * gate + if fold.is_finite() { fold * amt * 0.32 } else { 0.0 };
-        if y.is_finite() {
-            y.clamp(-1.2, 1.2)
-        } else {
-            0.0
-        }
+        let frac = (self.phase / hold_n).clamp(0.0, 1.0);
+        let mut y = self.prev + (self.held - self.prev) * frac;
+        let drive = 1.06 + amt * 0.78;
+        y = softsat(y, drive);
+        self.hp
+            .set_svf(FilterKind::Highpass, 80.0 + amt * 160.0, 0.62, sr);
+        self.lp.set_svf(
+            FilterKind::Lowpass,
+            13_200.0 * (2_600.0 / 13_200.0).powf(amt),
+            0.68,
+            sr,
+        );
+        y = self.lp.tick(self.hp.tick(y));
+        self.wow = (self.wow + (0.17 + amt * 0.11) / sr) % 1.0;
+        y *= 1.0 + (self.wow * std::f32::consts::TAU).sin() * amt * 0.012;
+        x * (1.0 - amt * 0.32) + y * (amt * 0.94)
     }
 }
 
@@ -553,6 +589,7 @@ struct Voice {
     vel: f32,
     phase: [f32; 3],
     ghost_phase: f32,
+    ghost_b: f32,
     env: f32,
     stage: EnvStage,
     age: u64,
@@ -567,6 +604,7 @@ impl Voice {
             vel: 0.0,
             phase: [0.0; 3],
             ghost_phase: 0.0,
+            ghost_b: 0.0,
             env: 0.0,
             stage: EnvStage::Off,
             age: 0,
@@ -627,6 +665,22 @@ fn unison_cents(n: i32) -> &'static [f32] {
     }
 }
 
+fn tpdf(noise: &mut u32) -> f32 {
+    let a = randf(noise);
+    let b = randf(noise);
+    a - b
+}
+
+fn randf(noise: &mut u32) -> f32 {
+    *noise = noise.wrapping_mul(1664525).wrapping_add(1013904223);
+    (*noise as i32 as f32) * (1.0 / 2_147_483_648.0)
+}
+
+fn softsat(x: f32, drive: f32) -> f32 {
+    let d = drive.max(0.25);
+    (x * d).tanh() / d.tanh()
+}
+
 fn cents_ratio(cents: f32) -> f32 {
     2.0f32.powf(cents / 1200.0)
 }
@@ -639,18 +693,31 @@ struct SkyForge {
     age: u64,
     noise: u32,
     haunt: DelayLine,
+    haunt2: DelayLine,
     water1: DelayLine,
     water2: DelayLine,
+    water3: DelayLine,
+    water4: DelayLine,
+    water_room: DelayLine,
     water_lp: Biquad,
     water_peak: Biquad,
+    water_air: Biquad,
     delay_lp: Biquad,
+    delay_lp2: Biquad,
     whisper_bp: Biquad,
-    aether: Aether,
-    limit: Limit,
+    whisper_bp2: Biquad,
+    aether_l: Aether,
+    aether_r: Aether,
+    limit_l: Limit,
+    limit_r: Limit,
     flutter_phase: f32,
+    flutter2_phase: f32,
     ring_phase: f32,
+    ring2_phase: f32,
     tide_a: f32,
     tide_b: f32,
+    tide_c: f32,
+    tide_d: f32,
     was_recording: bool,
 }
 
@@ -664,22 +731,36 @@ impl Default for SkyForge {
             age: 0,
             noise: 0xA341316C,
             haunt: DelayLine::new(64),
+            haunt2: DelayLine::new(64),
             water1: DelayLine::new(64),
             water2: DelayLine::new(64),
+            water3: DelayLine::new(64),
+            water4: DelayLine::new(64),
+            water_room: DelayLine::new(64),
             water_lp: Biquad::silent(),
             water_peak: Biquad::silent(),
+            water_air: Biquad::silent(),
             delay_lp: Biquad::silent(),
+            delay_lp2: Biquad::silent(),
             whisper_bp: Biquad::silent(),
-            aether: Aether {
-                held: 0.0,
-                phase: 0.0,
-                env: 0.0,
+            whisper_bp2: Biquad::silent(),
+            aether_l: Aether::new(),
+            aether_r: {
+                let mut a = Aether::new();
+                a.phase = 5.0;
+                a.wow = 0.31;
+                a
             },
-            limit: Limit { env: 0.0 },
+            limit_l: Limit { env: 0.0 },
+            limit_r: Limit { env: 0.0 },
             flutter_phase: 0.0,
+            flutter2_phase: 0.0,
             ring_phase: 0.0,
+            ring2_phase: 0.0,
             tide_a: 0.0,
-            tide_b: 0.0,
+            tide_b: 0.37,
+            tide_c: 0.61,
+            tide_d: 0.13,
             was_recording: false,
         }
     }
@@ -705,6 +786,7 @@ impl SkyForge {
         v.vel = vel.clamp(0.05, 1.0);
         v.phase = [0.0; 3];
         v.ghost_phase = 0.0;
+        v.ghost_b = 0.0;
         v.env = 0.0001;
         v.stage = EnvStage::Attack;
         v.age = self.age;
@@ -745,20 +827,26 @@ impl SkyForge {
             *v = Voice::new();
         }
         self.haunt.clear();
+        self.haunt2.clear();
         self.water1.clear();
         self.water2.clear();
-        self.aether = Aether {
-            held: 0.0,
-            phase: 0.0,
-            env: 0.0,
-        };
-        self.limit.env = 0.0;
+        self.water3.clear();
+        self.water4.clear();
+        self.water_room.clear();
+        self.aether_l = Aether::new();
+        self.aether_r = Aether::new();
+        self.limit_l.env = 0.0;
+        self.limit_r.env = 0.0;
     }
 
     fn alloc_delays(&mut self, sr: f32) {
         self.haunt.resize((HAUNT_SECS * sr) as usize + 16);
+        self.haunt2.resize((HAUNT_SECS * sr) as usize + 16);
         self.water1.resize((WATER_SECS * sr) as usize + 16);
         self.water2.resize((WATER_SECS * sr) as usize + 16);
+        self.water3.resize((WATER_SECS * sr) as usize + 16);
+        self.water4.resize((WATER_SECS * sr) as usize + 16);
+        self.water_room.resize((WATER_ROOM_SECS * sr) as usize + 16);
     }
 }
 
@@ -991,7 +1079,7 @@ impl Plugin for SkyForge {
                     }
                     EnvStage::Sustain => v.env = sus,
                     EnvStage::Release => {
-                        let r = rel + h * 0.45;
+                        let r = rel + h * 0.58;
                         v.env *= (-1.0 / (r * sr)).exp();
                         if v.env < 0.0003 {
                             v.active = false;
@@ -1016,19 +1104,25 @@ impl Plugin for SkyForge {
                 }
                 osc_sum *= uni_scale;
 
-                if h > 0.02 && !matches!(wave, WaveKind::Noise) {
-                    let gdt = (hz / sr).clamp(0.00001, 0.49) * 1.503;
-                    osc_sum += osc(wave, v.ghost_phase, gdt, pw, &mut self.noise) * h * 0.28;
+                if h > 0.015 && !matches!(wave, WaveKind::Noise) {
+                    let gdt = (hz / sr).clamp(0.00001, 0.49) * 1.0064;
+                    osc_sum += osc(wave, v.ghost_phase, gdt, pw, &mut self.noise) * h * 0.16;
                     v.ghost_phase += gdt;
                     if v.ghost_phase >= 1.0 {
                         v.ghost_phase -= 1.0;
                     }
+                    let gdt2 = (hz / sr).clamp(0.00001, 0.49) * 2.003;
+                    osc_sum += osc(wave, v.ghost_b, gdt2, pw, &mut self.noise) * h * 0.07;
+                    v.ghost_b += gdt2;
+                    if v.ghost_b >= 1.0 {
+                        v.ghost_b -= 1.0;
+                    }
                 }
 
-                let fcut = (cut * (1.0 - h * 0.16)).clamp(20.0, sr * 0.45);
+                let fcut = (cut * (1.0 - h * 0.18)).clamp(20.0, sr * 0.45);
                 let nyq = sr * 0.45;
                 let edge = ((fcut / 90.0).min((nyq - fcut) / 500.0)).clamp(0.25, 1.0);
-                let q = (reso * (1.0 + h * 0.22) * edge).clamp(0.1, 18.0);
+                let q = (reso * (1.0 + h * 0.16) * edge).clamp(0.1, 18.0);
                 v.filter.set_svf(fkind, fcut, q, sr);
                 let filtered = v.filter.tick(osc_sum);
                 mix += filtered * v.env * v.vel * 0.4;
@@ -1038,63 +1132,100 @@ impl Plugin for SkyForge {
                 mix = 0.0;
             }
 
-            let makeup = 1.0 / (1.0 + h * 0.28 + t * 0.28 + a * 0.12);
+            let makeup = 1.0 / (1.0 + h * 0.12 + t * 0.10 + a * 0.08);
             let after_vol = mix * vol * makeup;
-            let dry = after_vol * (1.0 - h * 0.14) * (1.0 - t * 0.28);
+            let dry = after_vol * (1.0 - h * 0.10) * (1.0 - t * 0.12);
 
-            self.flutter_phase = (self.flutter_phase + 0.19 / sr) % 1.0;
-            self.ring_phase = (self.ring_phase + (36.0 + h * 22.0) / sr) % 1.0;
-            let flutter = (self.flutter_phase * std::f32::consts::TAU).sin() * h * 0.012;
-            let haunt_delay = ((0.26 + h * 0.22) * (1.0 + flutter) * sr).max(2.0);
+            self.flutter_phase = (self.flutter_phase + 0.21 / sr) % 1.0;
+            self.flutter2_phase = (self.flutter2_phase + 1.63 / sr) % 1.0;
+            self.ring_phase = (self.ring_phase + (0.37 + h * 0.11) / sr) % 1.0;
+            self.ring2_phase = (self.ring2_phase + (111.1 + h * 8.0) / sr) % 1.0;
+            let wow = (self.flutter_phase * std::f32::consts::TAU).sin() * h * 0.0048;
+            let flutter = (self.flutter2_phase * std::f32::consts::TAU).sin() * h * 0.0017;
+            let haunt_delay = ((0.38 + h * 0.26) * (1.0 + wow + flutter) * sr).max(2.0);
+            let haunt_delay_r = (haunt_delay * 1.073).max(2.0);
             self.delay_lp
-                .set_svf(FilterKind::Lowpass, 2400.0 - h * 1000.0, 0.7, sr);
-            let delayed = self.haunt.read(haunt_delay);
-            let delayed_lp = self.delay_lp.tick(delayed);
-            let haunt_in = after_vol * h * 0.46 + delayed_lp * h * 0.42;
-            self.haunt.write(if haunt_in.is_finite() { haunt_in } else { 0.0 });
+                .set_svf(FilterKind::Lowpass, 1880.0 - h * 780.0, 0.68, sr);
+            self.delay_lp2
+                .set_svf(FilterKind::Lowpass, 1640.0 - h * 720.0, 0.7, sr);
+            let delayed = self.delay_lp.tick(self.haunt.read(haunt_delay));
+            let delayed_r = self.delay_lp2.tick(self.haunt2.read(haunt_delay_r));
+            let haunt_in = after_vol * h * 0.36 + delayed * h * 0.56;
+            let haunt_in_r = after_vol * h * 0.34 + delayed_r * h * 0.58;
+            self.haunt
+                .write(if haunt_in.is_finite() { haunt_in } else { 0.0 });
+            self.haunt2
+                .write(if haunt_in_r.is_finite() { haunt_in_r } else { 0.0 });
             let ring = (self.ring_phase * std::f32::consts::TAU).sin();
-            let whisper_n = {
-                self.noise = self.noise.wrapping_mul(1664525).wrapping_add(1013904223);
-                (self.noise as i32 as f32) * (1.0 / 2_147_483_648.0)
-            };
+            let ring2 = (self.ring2_phase * std::f32::consts::TAU).sin();
+            let whisper_n = randf(&mut self.noise);
             self.whisper_bp
-                .set_svf(FilterKind::Bandpass, 1700.0, 1.4, sr);
-            let whisper = self.whisper_bp.tick(whisper_n) * h * 0.07;
-            let haunt_out = delayed_lp * h * 0.55 + after_vol * ring * h * 0.32 + whisper;
+                .set_svf(FilterKind::Bandpass, 2100.0, 1.15, sr);
+            self.whisper_bp2
+                .set_svf(FilterKind::Bandpass, 390.0, 0.9, sr);
+            let whisper = self.whisper_bp.tick(whisper_n) * h * 0.038
+                + self.whisper_bp2.tick(whisper_n) * h * 0.028;
+            let haunt_l = delayed * h * 0.62 + after_vol * ring * h * 0.10 + after_vol * ring2 * h * 0.055 + whisper;
+            let haunt_r = delayed_r * h * 0.62 + after_vol * ring * h * 0.08 + after_vol * ring2 * h * 0.062 + whisper * 0.86;
 
-            self.tide_a = (self.tide_a + (0.09 + t * 0.2) / sr) % 1.0;
-            self.tide_b = (self.tide_b + (0.057 + t * 0.14) / sr) % 1.0;
-            let lp_cut = 11_000.0 * (380.0_f32 / 11_000.0).powf(t * t);
+            self.tide_a = (self.tide_a + (0.11 + t * 0.07) / sr) % 1.0;
+            self.tide_b = (self.tide_b + (0.173 + t * 0.09) / sr) % 1.0;
+            self.tide_c = (self.tide_c + (0.241 + t * 0.055) / sr) % 1.0;
+            self.tide_d = (self.tide_d + (0.083 + t * 0.12) / sr) % 1.0;
+            let lp_cut = 14_000.0 * (2_150.0 / 14_000.0).powf(t * 0.78);
             self.water_lp
-                .set_svf(FilterKind::Lowpass, lp_cut, 0.5 + t * 0.45, sr);
+                .set_svf(FilterKind::Lowpass, lp_cut, 0.52 + t * 0.28, sr);
             self.water_peak
-                .set_peaking(210.0 + t * 90.0, 0.85, t * 6.4, sr);
-            let wet_in = after_vol * t * 0.7;
-            let absorbed = self.water_peak.tick(self.water_lp.tick(wet_in));
-            let sat = absorbed.tanh();
-            let d1 = ((0.011 + t * 0.018)
-                + (self.tide_a * std::f32::consts::TAU).sin() * t * 0.0045)
+                .set_peaking(225.0 + t * 55.0, 0.72, t * 2.35, sr);
+            self.water_air
+                .set_highshelf(5_400.0, t * 3.1, sr);
+            let wet_in = after_vol * (0.52 + t * 0.38);
+            let absorbed = self.water_air.tick(self.water_peak.tick(self.water_lp.tick(wet_in)));
+            let sat = softsat(absorbed, 1.18 + t * 0.22);
+            let d1 = ((0.0076 + t * 0.0038)
+                + (self.tide_a * std::f32::consts::TAU).sin() * t * 0.0026)
                 * sr;
-            let d2 = ((0.024 + t * 0.022)
-                + (self.tide_b * std::f32::consts::TAU).sin() * t * 0.0055)
+            let d2 = ((0.0114 + t * 0.0046)
+                + (self.tide_b * std::f32::consts::TAU).sin() * t * 0.0031)
+                * sr;
+            let d3 = ((0.0158 + t * 0.0042)
+                + (self.tide_c * std::f32::consts::TAU).sin() * t * 0.0023)
+                * sr;
+            let d4 = ((0.0214 + t * 0.0055)
+                + (self.tide_d * std::f32::consts::TAU).sin() * t * 0.0034)
                 * sr;
             self.water1.write(sat);
             self.water2.write(sat);
-            let water_out = self.water1.read(d1.max(2.0)) + self.water2.read(d2.max(2.0));
+            self.water3.write(sat);
+            self.water4.write(sat);
+            let chorus_l = self.water1.read(d1.max(2.0)) + self.water3.read(d3.max(2.0));
+            let chorus_r = self.water2.read(d2.max(2.0)) + self.water4.read(d4.max(2.0));
+            let room_d = ((0.082 + t * 0.048)
+                + (self.tide_a * std::f32::consts::TAU).sin() * t * 0.007)
+                * sr;
+            let room_fb = self.water_room.read(room_d.max(2.0));
+            self.water_room.write(sat * 0.62 + room_fb * t * 0.28);
+            let room_l = room_fb;
+            let room_r = self.water_room.read((room_d * 1.19).max(2.0));
+            let water_l = (chorus_l * 0.36 + room_l * 0.44) * t;
+            let water_r = (chorus_r * 0.36 + room_r * 0.44) * t;
 
-            let bus = dry + haunt_out + water_out;
-            let crushed = self.aether.tick(bus, a);
-            let out = self.limit.tick(crushed, sr).clamp(-1.0, 1.0);
+            let bus_l = dry + haunt_l + water_l;
+            let bus_r = dry + haunt_r + water_r;
+            let crushed_l = self.aether_l.tick(bus_l, a, sr, &mut self.noise);
+            let crushed_r = self.aether_r.tick(bus_r, a, sr, &mut self.noise);
+            let out_l = self.limit_l.tick(crushed_l, sr).clamp(-1.0, 1.0);
+            let out_r = self.limit_r.tick(crushed_r, sr).clamp(-1.0, 1.0);
 
             if !outputs.is_empty() {
-                outputs[0][i] = out;
+                outputs[0][i] = out_l;
             }
             if outputs.len() > 1 {
-                outputs[1][i] = out;
+                outputs[1][i] = out_r;
             }
-            peak = peak.max(out.abs());
+            peak = peak.max(out_l.abs().max(out_r.abs()));
             if rec {
-                rec_local.push(out);
+                rec_local.push((out_l + out_r) * 0.5);
             }
             if i & 7 == 0 {
                 if let Ok(mut sc) = self.bus.scope.try_lock() {
