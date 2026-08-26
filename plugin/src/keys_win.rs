@@ -1,15 +1,14 @@
 //! Hand computer keys to Ableton so Live's own keyboard writes the clip.
 
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
-use windows::Win32::Foundation::{BOOL, HWND, LPARAM, TRUE};
+use windows::Win32::Foundation::{BOOL, FALSE, HWND, LPARAM, TRUE};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
-    VIRTUAL_KEY,
+    AttachThreadInput, SendInput, SetFocus, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
+    KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VIRTUAL_KEY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    AttachThreadInput, BringWindowToTop, EnumWindows, GetAncestor, GetForegroundWindow, GetWindow,
-    GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, SetFocus, SetForegroundWindow,
-    GA_ROOTOWNER, GW_OWNER,
+    BringWindowToTop, EnumWindows, GetAncestor, GetForegroundWindow, GetWindow, GetWindowTextW,
+    GetWindowThreadProcessId, IsWindowVisible, SetForegroundWindow, GA_ROOTOWNER, GW_OWNER,
 };
 
 static PLUGIN: AtomicIsize = AtomicIsize::new(0);
