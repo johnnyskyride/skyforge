@@ -76,9 +76,12 @@ jobs:
 
             Put SkyForge on a **MIDI track**. Delete any older SkyForge from the rack first, then drag this build in (Live caches the old MIDI layout). Arm the track. Play.
 
-            **Computer keyboard:** click the SkyForge window, then play Z/X/C/V (same layout as Live). The synth should sound. To write those notes into a clip, arm the track, hit Record, play. If the clip is still empty, set that track's MIDI From to **SkyForge** (the plugin), Monitor In, and record again.
+            **Computer keyboard:** the header has a **Keys / MIDI** switch.
+            - **MIDI** (default in Live): computer keys write the clip. Arm the track, Record, click SkyForge, then play **A–L** (A is C, same as Live). Turn Live's computer MIDI keyboard on (the keyboard icon, or M). Z/X shift octave.
+            - **Keys:** SkyForge keeps the keys and sounds itself (Z is C). Use this to play without writing a clip.
             - **MIDI controller:** Live → Settings → MIDI → your device → **Track** on. Arm, Record, play.
-            - Clicking SkyForge's on-screen piano is preview; computer keys are the playable keyboard.
+            - Clicking SkyForge's on-screen piano is preview.
+
 
             To print audio instead of MIDI: new audio track → Audio From: the SkyForge track → arm and record, or Freeze/Flatten.
 

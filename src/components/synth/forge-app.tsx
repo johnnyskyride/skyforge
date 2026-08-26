@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { flushSync } from "react-dom";
 import { Circle, Clapperboard, Download, HardDriveDownload, Minus, Plus, Power } from "lucide-react";
 import { SynthEngine, createAudioContext } from "@/lib/synth/engine";
-import { computerKeyOffset } from "@/lib/synth/keyboard-map";
+import { computerKeyOffset, isLivePassthroughKey } from "@/lib/synth/keyboard-map";
 import { renderSkyForgeClip, CLIP_MAX_SEC, BOUNCE_MAX_SEC, formatXHandle } from "@/lib/synth/clip-video";
 import { encodeWav } from "@/lib/synth/wav";
 import { encodeMp3 } from "@/lib/synth/mp3";
@@ -64,7 +64,13 @@ const BASE_C = 48;
 const HANDLE_KEY = "skyforge.xHandle";
 const SKIN_KEY = "skyforge.skin";
 const TRIM_KEY = "skyforge.trim";
+const KEYS_LIVE_KEY = "skyforge.keysLive";
 type ChassisSkin = "forge" | "rack";
+
+function skipMidiPort(name: string): boolean {
+  const n = name.toLowerCase();
+  return n.includes("wavetable") || n.includes("mapper") || n.includes("gs synth") || n.includes("microsoft gs");
+}
 
 function formatInterval(v: number): string {
   const n = Math.round(v);
@@ -103,6 +109,16 @@ export function ForgeApp() {
   const [armed, setArmed] = useState(false);
   const [activeNotes, setActiveNotes] = useState<number[]>([]);
   const [midiOn, setMidiOn] = useState(false);
+  const [keysLive, setKeysLive] = useState(() => {
+    if (typeof window === "undefined") return false;
+    if (isLiveHost()) return true;
+    try {
+      return localStorage.getItem(KEYS_LIVE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [hostPlatform, setHostPlatform] = useState("");
   const [recording, setRecording] = useState(false);
   const [clipping, setClipping] = useState(false);
   const [cutting, setCutting] = useState(false);
@@ -145,12 +161,17 @@ export function ForgeApp() {
   const kindLockRef = useRef(kindLock);
   const presetIdRef = useRef(presetId);
   const wyrmLogRef = useRef(wyrmLog);
+  const keysLiveRef = useRef(keysLive);
+  const hostPlatformRef = useRef(hostPlatform);
+  const midiOuts = useRef<MIDIOutput[]>([]);
   xHandleRef.current = xHandle;
   skinRef.current = skin;
   trimRef.current = trim;
   kindLockRef.current = kindLock;
   presetIdRef.current = presetId;
   wyrmLogRef.current = wyrmLog;
+  keysLiveRef.current = keysLive;
+  hostPlatformRef.current = hostPlatform;
   const clipAcc = useRef<{ sr: number; n: number; parts: Int16Array[]; mode: "bounce" | "wyrm" } | null>(null);
   const finishTakeRef = useRef<(take: ClipTake) => Promise<void>>(async () => {});
   const liveReadyRef = useRef(!isLiveHost());
@@ -165,6 +186,7 @@ export function ForgeApp() {
     preset?: string;
     scale?: FaceScale;
     banks?: string;
+    keysLive?: boolean;
   }) => {
     if (!isLiveHost()) return;
     if (partial?.skin !== undefined) skinRef.current = partial.skin;
@@ -172,6 +194,7 @@ export function ForgeApp() {
     if (partial?.handle !== undefined) xHandleRef.current = partial.handle;
     if (partial && "kind" in partial) kindLockRef.current = partial.kind ?? null;
     if (partial?.preset !== undefined) presetIdRef.current = partial.preset;
+    if (partial?.keysLive !== undefined) keysLiveRef.current = partial.keysLive;
     sendToPlugin({
       type: "Face",
       skin: skinRef.current,
@@ -181,6 +204,7 @@ export function ForgeApp() {
       preset: presetIdRef.current,
       scale: partial?.scale ?? scale,
       banks: partial?.banks,
+      keysLive: keysLiveRef.current,
     });
   };
 
@@ -234,8 +258,42 @@ export function ForgeApp() {
     return engine;
   }, [arm]);
 
+  const tapLive = (key: string, down: boolean) => {
+    sendToPlugin({ type: "TapLive", key, down });
+  };
+
+  const setKeysMode = (live: boolean) => {
+    keysLiveRef.current = live;
+    setKeysLive(live);
+    if (isLiveHost()) {
+      sendToPlugin({ type: "KeysLive", on: live });
+      pushFace({ keysLive: live });
+      if (live) sendToPlugin({ type: "FocusLive" });
+      return;
+    }
+    try {
+      localStorage.setItem(KEYS_LIVE_KEY, live ? "1" : "0");
+    } catch {
+      /* private */
+    }
+  };
+
+  const emitMidiOut = (midi: number, on: boolean, velocity = 0.85) => {
+    if (!keysLiveRef.current || midiOuts.current.length === 0) return;
+    const v = Math.max(1, Math.min(127, Math.round(velocity * 127)));
+    const bytes = on ? [0x90, midi & 127, v] : [0x80, midi & 127, 0x40];
+    for (const port of midiOuts.current) {
+      try {
+        port.send(bytes);
+      } catch {
+        /* unplugged */
+      }
+    }
+  };
+
   const noteOn = useCallback(
     async (midi: number, velocity = 0.85) => {
+      emitMidiOut(midi, true, velocity);
       if (isLiveHost()) {
         sendToPlugin({ type: "NoteOn", note: midi, vel: velocity });
         setActiveNotes((n) => (n.includes(midi) ? n : [...n, midi]));
@@ -252,6 +310,7 @@ export function ForgeApp() {
       sustained.current.add(midi);
       return;
     }
+    emitMidiOut(midi, false);
     if (isLiveHost()) {
       sendToPlugin({ type: "NoteOff", note: midi });
       setActiveNotes((n) => n.filter((x) => x !== midi));
@@ -261,10 +320,31 @@ export function ForgeApp() {
   }, []);
 
   useEffect(() => {
+    const writesLive = () => isLiveHost() && keysLiveRef.current && hostPlatformRef.current === "windows";
+    const liveMapOn = () => isLiveHost() && keysLiveRef.current;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.repeat) return;
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.isContentEditable)) {
+        return;
+      }
+      const k = e.key.toLowerCase();
+      if (liveMapOn() && (k === "z" || k === "x")) {
+        e.preventDefault();
+        if (k === "z") patch({ octave: Math.max(PARAM_RANGE.octave.min, params.octave - 1) });
+        else patch({ octave: Math.min(PARAM_RANGE.octave.max, params.octave + 1) });
+        if (writesLive() && !keysHeld.current.has(e.key)) {
+          keysHeld.current.set(e.key, -1);
+          tapLive(k, true);
+        }
+        return;
+      }
+      if (writesLive() && isLivePassthroughKey(e.key)) {
+        e.preventDefault();
+        if (!keysHeld.current.has(e.key)) {
+          keysHeld.current.set(e.key, -1);
+          tapLive(k, true);
+        }
         return;
       }
       if (e.code === "Space") {
@@ -282,7 +362,8 @@ export function ForgeApp() {
         patch({ octave: Math.min(PARAM_RANGE.octave.max, params.octave + 1) });
         return;
       }
-      const offset = computerKeyOffset(e.key);
+      const liveMap = isLiveHost() && keysLiveRef.current;
+      const offset = computerKeyOffset(e.key, liveMap);
       if (offset === undefined) return;
       e.preventDefault();
       if (keysHeld.current.has(e.key)) return;
@@ -291,10 +372,17 @@ export function ForgeApp() {
       void noteOn(midi);
     };
     const onKeyUp = (e: KeyboardEvent) => {
+      if (writesLive() && isLivePassthroughKey(e.key)) {
+        e.preventDefault();
+        if (keysHeld.current.has(e.key)) keysHeld.current.delete(e.key);
+        tapLive(e.key.toLowerCase(), false);
+        return;
+      }
       if (e.code === "Space") {
         e.preventDefault();
         sustain.current = false;
         for (const midi of sustained.current) {
+          emitMidiOut(midi, false);
           if (isLiveHost()) {
             sendToPlugin({ type: "NoteOff", note: midi });
             setActiveNotes((n) => n.filter((x) => x !== midi));
@@ -308,7 +396,7 @@ export function ForgeApp() {
       const midi = keysHeld.current.get(e.key);
       if (midi === undefined) return;
       keysHeld.current.delete(e.key);
-      noteOff(midi);
+      if (midi >= 0) noteOff(midi);
     };
     window.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("keyup", onKeyUp, true);
@@ -349,6 +437,14 @@ export function ForgeApp() {
         if (typeof msg.scale === "number") setScale(snapScale(msg.scale));
         if (typeof msg.banks === "string" && msg.banks) {
           setUserPresets(parseBanksJson(msg.banks, paramsRef.current));
+        }
+        if (typeof msg.keysLive === "boolean") {
+          keysLiveRef.current = msg.keysLive;
+          setKeysLive(msg.keysLive);
+        }
+        if (typeof msg.platform === "string") {
+          hostPlatformRef.current = msg.platform;
+          setHostPlatform(msg.platform);
         }
         if (msg.rec === "bounce") {
           bounceRef.current = true;
@@ -496,14 +592,16 @@ export function ForgeApp() {
       };
       const hook = () => {
         for (const input of a.inputs.values()) input.onmidimessage = handle;
+        midiOuts.current = [...(a.outputs?.values() ?? [])].filter((p) => !skipMidiPort(p.name ?? ""));
       };
       hook();
       a.onstatechange = hook;
-      setMidiOn(a.inputs.size > 0);
+      setMidiOn(a.inputs.size > 0 || midiOuts.current.length > 0);
     };
     if (!navigator.requestMIDIAccess) return;
     navigator.requestMIDIAccess().then(bind).catch(() => setMidiOn(false));
     return () => {
+      midiOuts.current = [];
       if (!access) return;
       for (const input of access.inputs.values()) input.onmidimessage = null;
     };
@@ -866,6 +964,12 @@ export function ForgeApp() {
     <main
       className="live-stage studio-bg relative"
       data-skin={skin}
+      onPointerUp={(e) => {
+        if (!isLiveHost() || !keysLiveRef.current) return;
+        const t = e.target as HTMLElement | null;
+        if (t?.closest("input, textarea, select")) return;
+        sendToPlugin({ type: "FocusLive" });
+      }}
     >
       <h1 className="sr-only">SkyForge analog synthesizer by johnnyskyride</h1>
       {!armed && !isLiveHost() ? <ArmGate onArm={arm} /> : null}
@@ -902,18 +1006,31 @@ export function ForgeApp() {
                 <span className="normal-case tracking-wide">@johnnyskyride</span>
                 {savedMsg ? (
                   <span className="ml-2 tracking-[0.12em] text-led">{savedMsg}</span>
-                ) : (
-                  <span
-                    className={cn(
-                      "ml-2 inline-flex items-center gap-1 tracking-[0.16em]",
-                      midiOn ? "text-led" : "text-subtle",
-                    )}
-                  >
+                ) : midiOn ? (
+                  <span className="ml-2 inline-flex items-center gap-1 tracking-[0.16em] text-led">
                     <Circle className="size-2 fill-current" />
-                    Midi
+                    Port
                   </span>
-                )}
+                ) : null}
               </p>
+            </div>
+            <div className="keys-midi" role="group" aria-label="Computer keyboard">
+              <button
+                type="button"
+                className={cn("keys-midi-btn", !keysLive && "is-on")}
+                aria-pressed={!keysLive}
+                onClick={() => setKeysMode(false)}
+              >
+                Keys
+              </button>
+              <button
+                type="button"
+                className={cn("keys-midi-btn", keysLive && "is-on")}
+                aria-pressed={keysLive}
+                onClick={() => setKeysMode(true)}
+              >
+                MIDI
+              </button>
             </div>
             <OptionsMenu
               scale={scale}
@@ -954,6 +1071,7 @@ export function ForgeApp() {
                 autoComplete="username"
                 spellCheck={false}
                 maxLength={15}
+                suppressHydrationWarning
               />
             </label>
             <button
@@ -1171,7 +1289,13 @@ export function ForgeApp() {
                 {armed ? "Live" : "Standby"} · {noteLabel}
               </p>
               <p className="hidden font-mono text-2xs text-subtle sm:block">
-                Z–M lower · Q–P upper · space sustain
+                {isLiveHost() && keysLive
+                  ? hostPlatform === "windows"
+                    ? "A–L writes the clip · Z/X octave · Live keyboard on"
+                    : "A–L plays · MIDI out on the track"
+                  : keysLive
+                    ? "Z–M lower · Q–P upper · MIDI out"
+                    : "Z–M lower · Q–P upper · space sustain"}
               </p>
             </div>
             <div className="mb-2 flex items-end gap-1 overflow-x-auto sm:gap-2">
@@ -1347,6 +1471,7 @@ export function ForgeApp() {
                 onNoteOn={(m, v) => void noteOn(m, v)}
                 onNoteOff={noteOff}
                 showComputerKeys
+                liveKeys={isLiveHost() && keysLive}
               />
             </div>
           </div>

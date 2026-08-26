@@ -23,9 +23,14 @@ enum Action {
         preset: Option<String>,
         scale: Option<f32>,
         banks: Option<String>,
+        #[serde(alias = "keysLive")]
+        keys_live: Option<bool>,
     },
     NoteOn { note: u8, vel: Option<f32> },
     NoteOff { note: u8 },
+    KeysLive { on: bool },
+    TapLive { key: String, down: bool },
+    FocusLive,
     ClipStart { mode: Option<String> },
     ClipStop,
     Scale { factor: f32 },
@@ -212,6 +217,14 @@ fn clean_handle(s: &str) -> String {
         .collect()
 }
 
+fn apply_keys_live(params: &SkyForgeParams, on: bool) {
+    if let Ok(mut face) = params.face.lock() {
+        face.keys_live = on;
+    }
+    #[cfg(windows)]
+    crate::keys_win::set_keys_live(on);
+}
+
 fn apply_face(params: &SkyForgeParams, patch: Action) {
     let Action::Face {
         skin,
@@ -221,6 +234,7 @@ fn apply_face(params: &SkyForgeParams, patch: Action) {
         preset,
         scale,
         banks,
+        keys_live,
     } = patch
     else {
         return;
@@ -257,6 +271,11 @@ fn apply_face(params: &SkyForgeParams, patch: Action) {
         if s.len() <= 48_000 {
             face.banks = s;
         }
+    }
+    if let Some(on) = keys_live {
+        face.keys_live = on;
+        #[cfg(windows)]
+        crate::keys_win::set_keys_live(on);
     }
 }
 
@@ -316,6 +335,16 @@ fn open_in_browser(url: &str) {
     })();
 }
 
+fn host_platform() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "mac"
+    } else {
+        "linux"
+    }
+}
+
 fn snapshot(params: &SkyForgeParams) -> serde_json::Value {
     let face = params
         .face
@@ -351,6 +380,8 @@ fn snapshot(params: &SkyForgeParams) -> serde_json::Value {
         "rec": face.rec,
         "scale": face.scale,
         "banks": face.banks,
+        "keysLive": face.keys_live,
+        "platform": host_platform(),
         "version": env!("CARGO_PKG_VERSION"),
     })
 }
@@ -721,11 +752,29 @@ pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<crate::FaceBus>) -> Op
         .with_mouse_handler(|_| EventStatus::Captured)
         .with_resync(resync.clone())
         .with_event_loop(move |ctx, setter, window| {
+            #[cfg(windows)]
+            {
+                use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
+                if let RawWindowHandle::Win32(h) = window.raw_window_handle() {
+                    let hwnd = h.hwnd as isize;
+                    if hwnd != 0 {
+                        crate::keys_win::set_plugin_hwnd(hwnd);
+                    }
+                }
+            }
             while let Ok(value) = ctx.next_event() {
                 match serde_json::from_value::<Action>(value) {
                     Ok(Action::Init) => {
                         ready.store(true, Ordering::Relaxed);
                         bus.midi_out.ensure();
+                        let keys_on = params
+                            .face
+                            .lock()
+                            .map(|f| f.keys_live)
+                            .unwrap_or(true);
+                        apply_keys_live(&params, keys_on);
+                        #[cfg(windows)]
+                        crate::keys_win::yield_to_live();
                         load_wyrms(&params, &bus);
                         push_state(ctx, &params, &bus, true);
                         let scale = params
@@ -763,6 +812,24 @@ pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<crate::FaceBus>) -> Op
                         if let Ok(mut q) = bus.inbox.lock() {
                             q.push((note, false, 0.0));
                         }
+                    }
+                    Ok(Action::KeysLive { on }) => {
+                        apply_keys_live(&params, on);
+                        if on {
+                            bus.midi_out.ensure();
+                            #[cfg(windows)]
+                            crate::keys_win::yield_to_live();
+                        }
+                    }
+                    Ok(Action::TapLive { key, down }) => {
+                        #[cfg(windows)]
+                        crate::keys_win::tap(&key, down);
+                        #[cfg(not(windows))]
+                        let _ = (key, down);
+                    }
+                    Ok(Action::FocusLive) => {
+                        #[cfg(windows)]
+                        crate::keys_win::yield_to_live();
                     }
                     Ok(Action::ClipStart { mode }) => {
                         let mode = match mode.as_deref() {

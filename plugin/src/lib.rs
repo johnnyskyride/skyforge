@@ -9,6 +9,8 @@ mod editor;
 mod files;
 mod midi_out;
 #[cfg(windows)]
+mod keys_win;
+#[cfg(windows)]
 mod share_win;
 
 const MAX_VOICES: usize = 8;
@@ -68,6 +70,12 @@ pub(crate) struct FaceState {
     pub rec: String,
     pub scale: f32,
     pub banks: String,
+    #[serde(default = "default_keys_live")]
+    pub keys_live: bool,
+}
+
+fn default_keys_live() -> bool {
+    true
 }
 
 impl Default for FaceState {
@@ -81,6 +89,7 @@ impl Default for FaceState {
             rec: String::new(),
             scale: 1.0,
             banks: String::new(),
+            keys_live: true,
         }
     }
 }
