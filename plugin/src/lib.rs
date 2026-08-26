@@ -551,7 +551,7 @@ impl Aether {
             .set_svf(FilterKind::Highpass, 80.0 + amt * 160.0, 0.62, sr);
         self.lp.set_svf(
             FilterKind::Lowpass,
-            13_200.0 * (2_600.0 / 13_200.0).powf(amt),
+            13_200.0 * (2_600.0_f32 / 13_200.0).powf(amt),
             0.68,
             sr,
         );
@@ -1172,7 +1172,7 @@ impl Plugin for SkyForge {
             self.tide_b = (self.tide_b + (0.173 + t * 0.09) / sr) % 1.0;
             self.tide_c = (self.tide_c + (0.241 + t * 0.055) / sr) % 1.0;
             self.tide_d = (self.tide_d + (0.083 + t * 0.12) / sr) % 1.0;
-            let lp_cut = 14_000.0 * (2_150.0 / 14_000.0).powf(t * 0.78);
+            let lp_cut = 14_000.0 * (2_150.0_f32 / 14_000.0).powf(t * 0.78);
             self.water_lp
                 .set_svf(FilterKind::Lowpass, lp_cut, 0.52 + t * 0.28, sr);
             self.water_peak
