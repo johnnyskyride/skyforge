@@ -1314,17 +1314,26 @@ export function ForgeApp() {
 
 function HauntSpider() {
   return (
-    <svg className="haunt-spider" viewBox="0 0 64 64" aria-hidden>
-      <circle cx="32" cy="18" r="6.2" fill="currentColor" />
-      <ellipse cx="32" cy="36" rx="7.4" ry="13.2" fill="currentColor" />
-      <path
-        d="M26 16 L14 6 L6 2 M24 24 L10 18 L2 14 M24 40 L10 48 L2 54 M26 48 L14 58 L6 63 M38 16 L50 6 L58 2 M40 24 L54 18 L62 14 M40 40 L54 48 L62 54 M38 48 L50 58 L58 63"
+    <svg className="haunt-spider" viewBox="0 0 72 52" aria-hidden>
+      <g
         fill="none"
         stroke="currentColor"
-        strokeWidth="3.1"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+        strokeWidth="1.85"
+        strokeLinecap="square"
+        strokeLinejoin="miter"
+      >
+        <path d="M28 16 L16 7 L6 3" />
+        <path d="M26 22 L12 18 L2 14" />
+        <path d="M26 30 L12 36 L3 46" />
+        <path d="M28 36 L16 45 L8 51" />
+        <path d="M44 16 L56 7 L66 3" />
+        <path d="M46 22 L60 18 L70 14" />
+        <path d="M46 30 L60 36 L69 46" />
+        <path d="M44 36 L56 45 L64 51" />
+        <circle cx="36" cy="15" r="5.2" />
+        <ellipse cx="36" cy="30.5" rx="6.4" ry="11" />
+        <path d="M36 21.5 V40.5" strokeWidth="1.15" />
+      </g>
     </svg>
   );
 }
