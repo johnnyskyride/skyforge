@@ -178,7 +178,7 @@ impl Default for SkyForgeParams {
             .with_unit(" s"),
             octave: IntParam::new("Octave", 0, IntRange::Linear { min: -2, max: 2 }),
             unison: IntParam::new("Unison", 2, IntRange::Linear { min: 1, max: 3 }),
-            volume: FloatParam::new("Volume", 0.72, FloatRange::Linear { min: 0.0, max: 1.0 })
+            volume: FloatParam::new("Volume", 0.84, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_smoother(SmoothingStyle::Linear(20.0)),
             halloween: FloatParam::new("Halloween", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_smoother(SmoothingStyle::Linear(50.0)),
@@ -286,62 +286,62 @@ fn kind_shape(kind: Kind) -> Option<Shape> {
         Kind::Earth => Shape {
             wave: WaveKind::Triangle,
             filter: FilterKind::Lowpass,
-            cutoff: 360.0,
-            reso: 1.3,
-            attack: 0.16,
-            decay: 0.48,
-            sustain: 0.88,
-            release: 1.15,
+            cutoff: 1180.0,
+            reso: 0.85,
+            attack: 0.07,
+            decay: 0.38,
+            sustain: 0.9,
+            release: 0.85,
             octave: -1,
             unison: 2,
-            waters: 0.16,
+            waters: 0.08,
             halloween: 0.0,
             aether: 0.0,
         },
         Kind::Water => Shape {
             wave: WaveKind::Sine,
-            filter: FilterKind::Bandpass,
-            cutoff: 680.0,
-            reso: 2.6,
-            attack: 0.24,
-            decay: 0.42,
-            sustain: 0.84,
-            release: 0.9,
+            filter: FilterKind::Lowpass,
+            cutoff: 2400.0,
+            reso: 0.7,
+            attack: 0.1,
+            decay: 0.36,
+            sustain: 0.86,
+            release: 0.75,
             octave: 0,
             unison: 2,
-            waters: 0.64,
+            waters: 0.42,
             halloween: 0.0,
             aether: 0.0,
         },
         Kind::Fire => Shape {
             wave: WaveKind::Saw,
             filter: FilterKind::Lowpass,
-            cutoff: 3400.0,
-            reso: 5.4,
+            cutoff: 3800.0,
+            reso: 2.8,
             attack: 0.002,
-            decay: 0.15,
-            sustain: 0.3,
-            release: 0.09,
+            decay: 0.18,
+            sustain: 0.62,
+            release: 0.16,
             octave: 0,
             unison: 1,
             waters: 0.0,
-            halloween: 0.32,
+            halloween: 0.22,
             aether: 0.0,
         },
         Kind::Wind => Shape {
             wave: WaveKind::Triangle,
             filter: FilterKind::Highpass,
-            cutoff: 1500.0,
-            reso: 1.7,
-            attack: 0.045,
-            decay: 0.2,
-            sustain: 0.55,
-            release: 0.42,
-            octave: 1,
+            cutoff: 320.0,
+            reso: 0.9,
+            attack: 0.03,
+            decay: 0.22,
+            sustain: 0.72,
+            release: 0.4,
+            octave: 0,
             unison: 3,
-            waters: 0.1,
+            waters: 0.06,
             halloween: 0.0,
-            aether: 0.16,
+            aether: 0.2,
         },
     })
 }
@@ -540,7 +540,7 @@ impl Limit {
         } else {
             self.env *= rel;
         }
-        let thr = 0.398; // -8 dB
+        let thr = 0.63;
         let g = if self.env > thr { thr / self.env } else { 1.0 };
         let y = (x * g).clamp(-1.4, 1.4);
         y - y * y * y * (1.0 / 6.0)
@@ -1017,16 +1017,16 @@ impl Plugin for SkyForge {
                 let q = (reso * (1.0 + h * 0.22) * edge).clamp(0.1, 18.0);
                 v.filter.set_svf(fkind, fcut, q, sr);
                 let filtered = v.filter.tick(osc_sum);
-                mix += filtered * v.env * v.vel * 0.22;
+                mix += filtered * v.env * v.vel * 0.4;
             }
 
             if !mix.is_finite() {
                 mix = 0.0;
             }
 
-            let makeup = 1.0 / (1.0 + h * 0.5 + t * 0.82 + a * 0.22);
+            let makeup = 1.0 / (1.0 + h * 0.28 + t * 0.28 + a * 0.12);
             let after_vol = mix * vol * makeup;
-            let dry = after_vol * (1.0 - h * 0.2) * (1.0 - t * 0.7);
+            let dry = after_vol * (1.0 - h * 0.14) * (1.0 - t * 0.28);
 
             self.flutter_phase = (self.flutter_phase + 0.19 / sr) % 1.0;
             self.ring_phase = (self.ring_phase + (36.0 + h * 22.0) / sr) % 1.0;
