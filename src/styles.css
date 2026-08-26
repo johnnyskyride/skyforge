@@ -70,3 +70,92 @@ img, canvas, svg, video {
 .forge-chassis[data-skin="rack"] .piano-dock {
   padding-bottom: 0.65rem;
 }
+
+html,
+html[data-live="1"],
+body {
+  color-scheme: dark;
+  background-color: #1b1624;
+}
+.chassis-head {
+  overflow: visible;
+  z-index: 30;
+}
+select,
+select option,
+select optgroup,
+.preset-select,
+.preset-plate,
+.options-plate {
+  color-scheme: dark;
+}
+select,
+.preset-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: #1b1624 !important;
+  color: #ece8f0 !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 10.5rem;
+  max-width: 14rem;
+}
+select option,
+select optgroup {
+  background-color: #120e18 !important;
+  color: #ece8f0 !important;
+}
+.preset-select-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: 0.06em;
+  text-align: left;
+}
+.preset-select.is-on {
+  color: var(--color-led);
+}
+.options-plate,
+.preset-plate {
+  background-color: #120e18 !important;
+  background-image: linear-gradient(#1b1624 0%, #120e18 100%) !important;
+  color: #ece8f0 !important;
+}
+.preset-plate {
+  width: 16rem;
+  max-height: 18rem;
+  overflow: auto;
+  padding-top: 0.55rem;
+}
+.preset-list {
+  display: flex;
+  flex-direction: column;
+}
+.preset-plate .options-item {
+  text-transform: none;
+  letter-spacing: 0.06em;
+  background-color: transparent;
+  color: #ece8f0;
+}
+.options-item.is-on {
+  color: var(--color-led);
+  background: #ece8f014;
+}
+[data-skin="rack"] select,
+[data-skin="rack"] .preset-select {
+  background-color: #141518 !important;
+  color: #cfd4cf !important;
+}
+[data-skin="rack"] select option,
+[data-skin="rack"] .options-plate,
+[data-skin="rack"] .preset-plate {
+  background-color: #0c0d0e !important;
+  background-image: linear-gradient(#1a1b1e 0%, #0c0d0e 100%) !important;
+  color: #cfd4cf !important;
+}
+[data-skin="rack"] .options-item.is-on {
+  color: #3cff6a;
+}

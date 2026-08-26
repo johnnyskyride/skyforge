@@ -45,6 +45,7 @@ import {
 } from "@/lib/synth/scope-meter";
 import type { ClipTake } from "@/lib/synth/clip-video";
 import { OptionsMenu } from "./options-menu";
+import { PresetSelect } from "./preset-select";
 import {
   loadUserPresets,
   parseBank,
@@ -922,32 +923,16 @@ export function ForgeApp() {
               onLoadFile={(file) => void loadUserBankFile(file)}
               onPickUser={(id) => applyPreset(id)}
             />
-            <label className="sr-only" htmlFor="forge-preset">
-              Preset
-            </label>
-            <select
-              id="forge-preset"
-              value={PRESETS.some((p) => p.id === presetId) || userPresets.some((p) => p.id === presetId) ? presetId : "init"}
-              onChange={(e) => applyPreset(e.target.value)}
-              className="preset-select"
-            >
-              <optgroup label="Forge">
-                {PRESETS.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </optgroup>
-              {userPresets.length > 0 ? (
-                <optgroup label="Yours">
-                  {userPresets.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </optgroup>
-              ) : null}
-            </select>
+            <PresetSelect
+              value={
+                PRESETS.some((p) => p.id === presetId) || userPresets.some((p) => p.id === presetId)
+                  ? presetId
+                  : "init"
+              }
+              forge={PRESETS}
+              yours={userPresets}
+              onPick={(id) => applyPreset(id)}
+            />
             <button
               id="skyforge-bounce"
               type="button"
