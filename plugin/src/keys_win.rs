@@ -1,14 +1,14 @@
 //! Hand computer keys to Ableton so Live's own keyboard writes the clip.
 
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
-use windows::Win32::Foundation::{BOOL, FALSE, HWND, LPARAM, TRUE};
+use windows::Win32::Foundation::{BOOL, HWND, LPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    AttachThreadInput, SendInput, SetFocus, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
-    KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VIRTUAL_KEY,
+    SendInput, SetFocus, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
+    KEYEVENTF_KEYUP, VIRTUAL_KEY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, EnumWindows, GetAncestor, GetForegroundWindow, GetWindow, GetWindowTextW,
-    GetWindowThreadProcessId, IsWindowVisible, SetForegroundWindow, GA_ROOTOWNER, GW_OWNER,
+    IsWindowVisible, SetForegroundWindow, GA_ROOTOWNER, GW_OWNER,
 };
 
 static PLUGIN: AtomicIsize = AtomicIsize::new(0);
@@ -32,27 +32,8 @@ pub fn yield_to_live() {
     if !KEYS_LIVE.load(Ordering::Relaxed) {
         return;
     }
-    let Some(target) = live_hwnd() else {
-        return;
-    };
-    unsafe {
-        let plugin = PLUGIN.load(Ordering::Relaxed);
-        let hwnd = HWND(plugin);
-        let mut plugin_pid = 0u32;
-        let mut live_pid = 0u32;
-        let plugin_tid = if plugin != 0 {
-            GetWindowThreadProcessId(hwnd, Some(&mut plugin_pid))
-        } else {
-            0
-        };
-        let live_tid = GetWindowThreadProcessId(target, Some(&mut live_pid));
-        if plugin_tid != 0 && plugin_tid != live_tid {
-            let _ = AttachThreadInput(plugin_tid, live_tid, TRUE);
-            steal_focus(target);
-            let _ = AttachThreadInput(plugin_tid, live_tid, FALSE);
-        } else {
-            steal_focus(target);
-        }
+    if let Some(target) = live_hwnd() {
+        steal_focus(target);
     }
 }
 
