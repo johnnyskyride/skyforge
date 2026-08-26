@@ -1,6 +1,6 @@
 use crate::{FaceState, FilterKind, SkyForgeParams, WaveKind};
 use nih_plug::prelude::*;
-use nih_plug_webview::{HTMLSource, Key, WebViewEditor};
+use nih_plug_webview::{EventStatus, HTMLSource, Key, WebViewEditor};
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -661,6 +661,7 @@ pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<crate::FaceBus>) -> Op
         .with_background_color((0x22, 0x1c, 0x2e, 255))
         .with_developer_mode(false)
         .with_keyboard_handler(|event| event.key == Key::Escape)
+        .with_mouse_handler(|_| EventStatus::Captured)
         .with_resync(resync.clone())
         .with_event_loop(move |ctx, setter, window| {
             while let Ok(value) = ctx.next_event() {

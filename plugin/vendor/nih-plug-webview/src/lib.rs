@@ -234,6 +234,7 @@ impl Editor for WebViewEditor {
                     height: height.load(Ordering::Relaxed) as u32,
                 })
                 .with_accept_first_mouse(true)
+                .with_browser_accelerator_keys(false)
                 .with_devtools(developer_mode)
                 .with_web_context(web_context)
                 .with_initialization_script(include_str!("script.js"))
