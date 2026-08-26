@@ -1106,9 +1106,23 @@ export function drawSummonedDragon(
   const shoulder = Math.floor(SPINE * 0.36);
   const rootFar = pts[shoulder - 4]!;
   const rootNear = pts[shoulder]!;
-  const flapBase = stillness > 0.65 ? 0.24 + glance * 0.05 * Math.sin(travel * 0.18) : 0.5 + 0.5 * Math.sin(travel);
-  const flap = flapBase;
-  const flapFar = stillness > 0.65 ? flapBase : 0.5 + 0.5 * Math.sin(travel + 0.22);
+  const flapHz = Math.max(0.75, dna.beatHz) * (0.92 + nowAmp * 0.38);
+  const phase = time * flapHz * Math.PI * 2;
+  const stroke =
+    chrome === "clip"
+      ? 0.24 + Math.min(1, nowAmp * 1.2 + onset * 0.4) * 0.76
+      : 0.26 + Math.min(1, nowAmp * 0.95 + onset * 0.22) * 0.58;
+  let flap: number;
+  let flapFar: number;
+  if (stillness > 0.65) {
+    flap = 0.24 + glance * 0.05 * Math.sin(travel * 0.18);
+    flapFar = flap;
+  } else {
+    const wave = 0.5 + 0.5 * Math.sin(phase);
+    const waveFar = 0.5 + 0.5 * Math.sin(phase + 0.3);
+    flap = Math.max(0.08, 0.14 + stroke * wave - onset * 0.42);
+    flapFar = Math.max(0.08, 0.14 + stroke * waveFar - onset * 0.3);
+  }
   drawWing(ctx, rootFar, flapFar, 0.72 * size, dna, true);
   drawLeg(ctx, pts, Math.floor(SPINE * 0.24), 0, travel * Math.max(0, 1 - stillness), dna, true, size);
   drawLeg(ctx, pts, Math.floor(SPINE * 0.52), Math.PI, travel * Math.max(0, 1 - stillness), dna, true, size);

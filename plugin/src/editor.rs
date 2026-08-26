@@ -34,6 +34,7 @@ enum Action {
     SaveChunk { data: String },
     SaveEnd,
     SaveWav { stem: Option<String> },
+    OpenUrl { url: String },
     WyrmKeep {
         id: Option<String>,
         epithet: Option<String>,
@@ -265,6 +266,41 @@ fn face_px(factor: f32) -> (u32, u32) {
     let w = ((FACE_W as f32) * f).round() as u32;
     let h = ((FACE_H as f32) * f).round() as u32;
     (w.max(640), h.max(420))
+}
+
+fn open_in_browser(url: &str) {
+    let url = url.trim();
+    let ok = (url.starts_with("https://x.com/") || url.starts_with("https://twitter.com/"))
+        && !url.contains('\n')
+        && !url.contains('\r')
+        && !url.contains(' ')
+        && !url.contains('"')
+        && url.len() < 2000;
+    if !ok {
+        return;
+    }
+    let _ = (|| -> Result<(), std::io::Error> {
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            std::process::Command::new("cmd")
+                .args(["/C", "start", "", url])
+                .creation_flags(0x0800_0000)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()?;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            std::process::Command::new("open").arg(url).spawn()?;
+        }
+        #[cfg(target_os = "linux")]
+        {
+            std::process::Command::new("xdg-open").arg(url).spawn()?;
+        }
+        Ok(())
+    })();
 }
 
 fn snapshot(params: &SkyForgeParams) -> serde_json::Value {
@@ -739,6 +775,7 @@ pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<crate::FaceBus>) -> Op
                     Ok(Action::SaveChunk { data }) => save_chunk(&bus, &data),
                     Ok(Action::SaveEnd) => save_end(ctx, &bus),
                     Ok(Action::SaveWav { stem }) => save_wav(ctx, &bus, stem),
+                    Ok(Action::OpenUrl { url }) => open_in_browser(&url),
                     Ok(action @ Action::WyrmKeep { .. }) => {
                         keep_wyrm(&bus, action);
                         persist_wyrms(&params, &bus);

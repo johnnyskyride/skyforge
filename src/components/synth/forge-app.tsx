@@ -3,9 +3,10 @@ import { flushSync } from "react-dom";
 import { Circle, Clapperboard, Download, HardDriveDownload, Minus, Plus, Power } from "lucide-react";
 import { SynthEngine, createAudioContext } from "@/lib/synth/engine";
 import { computerKeyOffset } from "@/lib/synth/keyboard-map";
-import { renderSkyForgeClip, CLIP_MAX_SEC, BOUNCE_MAX_SEC } from "@/lib/synth/clip-video";
+import { renderSkyForgeClip, CLIP_MAX_SEC, BOUNCE_MAX_SEC, formatXHandle } from "@/lib/synth/clip-video";
 import { encodeWav } from "@/lib/synth/wav";
 import { encodeMp3 } from "@/lib/synth/mp3";
+import { shareWyrmOnX } from "@/lib/synth/share-x";
 import { encodeMidiFile } from "@/lib/synth/midi-file";
 import { formatDb, formatHz, formatTime, midiToName } from "@/lib/synth/notes";
 import { saveSkyForgeOffline } from "@/lib/synth/offline-file";
@@ -804,6 +805,21 @@ export function ForgeApp() {
     }
   };
 
+  const shareClip = () => {
+    const take = clipSave;
+    if (!take) return;
+    void shareWyrmOnX({
+      epithet: take.epithet,
+      element: take.element,
+      videoUrl: take.url || undefined,
+      videoName: take.name,
+      thumb: take.thumb,
+      handle: formatXHandle(xHandleRef.current),
+    }).then((how) => {
+      setSavedMsg(how === "sheet" ? "Shared" : "Opened X · drop the wyrm onto the post");
+    });
+  };
+
   const saveClipAudio = (kind: "wav" | "mp3") => {
     const take = clipSave;
     if (!take?.samples?.length) return;
@@ -1005,6 +1021,7 @@ export function ForgeApp() {
               onClose={() => setClipSave(null)}
               onWav={() => saveClipAudio("wav")}
               onMp3={() => saveClipAudio("mp3")}
+              onShare={shareClip}
             />
           ) : null}
           {clipSave?.fromHistory ? (
@@ -1016,14 +1033,7 @@ export function ForgeApp() {
               name={clipSave.name}
               canAudio={!!clipSave.samples && clipSave.samples.length > 0}
               onClose={() => setClipSave(null)}
-              onShare={() => {
-                const text = `${clipSave.epithet} · ${clipSave.element}\nEar Wyrm — SkyForge SF-33`;
-                window.open(
-                  `https://x.com/intent/post?text=${encodeURIComponent(text)}`,
-                  "_blank",
-                  "noopener,noreferrer",
-                );
-              }}
+              onShare={shareClip}
               onWav={() => saveClipAudio("wav")}
               onMp3={() => saveClipAudio("mp3")}
             />

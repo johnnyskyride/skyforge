@@ -46,6 +46,7 @@ export function WyrmPreview({
   onClose,
   onWav,
   onMp3,
+  onShare,
 }: {
   epithet: string;
   element: string;
@@ -55,6 +56,7 @@ export function WyrmPreview({
   onClose: () => void;
   onWav?: () => void;
   onMp3?: () => void;
+  onShare?: () => void;
 }) {
   return (
     <div className="wyrm-preview">
@@ -76,6 +78,11 @@ export function WyrmPreview({
           <button type="button" className="header-btn" onClick={onMp3} disabled={!canAudio}>
             MP3
           </button>
+          {onShare ? (
+            <button type="button" className="header-btn" onClick={onShare}>
+              Share on X
+            </button>
+          ) : null}
           <button type="button" className="header-btn" onClick={onClose}>
             <X className="size-3.5" />
             Close
