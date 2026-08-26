@@ -816,7 +816,7 @@ export function ForgeApp() {
       thumb: take.thumb,
       handle: formatXHandle(xHandleRef.current),
     }).then((how) => {
-      setSavedMsg(how === "sheet" ? "Shared" : "Opened X · drop the wyrm onto the post");
+      setSavedMsg(how === "sheet" ? "Share sheet · pick X" : "Opened X · drop the wyrm onto the post");
     });
   };
 

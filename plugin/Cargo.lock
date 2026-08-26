@@ -2203,8 +2203,10 @@ dependencies = [
  "midir",
  "nih_plug",
  "nih_plug_webview",
+ "raw-window-handle",
  "serde",
  "serde_json",
+ "windows 0.56.0",
 ]
 
 [[package]]

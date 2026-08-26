@@ -1,4 +1,4 @@
-import { isLiveHost, sendToPlugin } from "./scope-meter";
+import { isLiveHost, saveToPlugin, sendToPlugin } from "./scope-meter";
 
 export type ShareWyrm = {
   epithet: string;
@@ -52,6 +52,18 @@ export async function shareWyrmOnX(s: ShareWyrm): Promise<ShareResult> {
   const text = caption(s);
   const name = s.videoName || "ear-wyrm.mp4";
   const file = s.videoUrl ? await fileFromUrl(s.videoUrl, name) : null;
+
+  if (isLiveHost()) {
+    if (file) {
+      try {
+        await saveToPlugin(name, file);
+      } catch {
+        /* cut may already have written it */
+      }
+    }
+    sendToPlugin({ type: "ShareX", name, text, url: intentUrl(text) });
+    return "sheet";
+  }
 
   if (file && typeof navigator.canShare === "function") {
     try {

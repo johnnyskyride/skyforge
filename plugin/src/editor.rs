@@ -35,6 +35,11 @@ enum Action {
     SaveEnd,
     SaveWav { stem: Option<String> },
     OpenUrl { url: String },
+    ShareX {
+        name: Option<String>,
+        text: Option<String>,
+        url: Option<String>,
+    },
     WyrmKeep {
         id: Option<String>,
         epithet: Option<String>,
@@ -499,6 +504,12 @@ fn save_end(ctx: &nih_plug_webview::WindowHandler, bus: &crate::FaceBus) {
     }
     match crate::files::write_download(&name, &bytes) {
         Ok(path) => {
+            let lower = name.to_ascii_lowercase();
+            if lower.ends_with(".mp4") || lower.ends_with(".webm") {
+                if let Ok(mut slot) = bus.last_video.lock() {
+                    *slot = Some(path.clone());
+                }
+            }
             let _ = ctx.send_json(saved_json(true, &crate::files::describe(&path)));
         }
         Err(_) => {
@@ -776,6 +787,26 @@ pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<crate::FaceBus>) -> Op
                     Ok(Action::SaveEnd) => save_end(ctx, &bus),
                     Ok(Action::SaveWav { stem }) => save_wav(ctx, &bus, stem),
                     Ok(Action::OpenUrl { url }) => open_in_browser(&url),
+                    Ok(Action::ShareX { name, text, url }) => {
+                        let name = name.unwrap_or_default();
+                        let text = text.unwrap_or_default();
+                        let shown = {
+                            #[cfg(windows)]
+                            {
+                                crate::share_win::share(window, &bus, &name, &text)
+                            }
+                            #[cfg(not(windows))]
+                            {
+                                let _ = (&name, &text, window);
+                                false
+                            }
+                        };
+                        if !shown {
+                            if let Some(url) = url {
+                                open_in_browser(&url);
+                            }
+                        }
+                    }
                     Ok(action @ Action::WyrmKeep { .. }) => {
                         keep_wyrm(&bus, action);
                         persist_wyrms(&params, &bus);

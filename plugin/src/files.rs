@@ -66,6 +66,11 @@ pub fn write_download(name: &str, bytes: &[u8]) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+pub fn find_download(name: &str) -> Option<PathBuf> {
+    let path = downloads_dir().join(safe_name(name));
+    path.is_file().then_some(path)
+}
+
 pub fn file_name(path: &Path) -> String {
     path.file_name()
         .and_then(|s| s.to_str())

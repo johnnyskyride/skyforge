@@ -8,6 +8,8 @@ use std::sync::{Arc, Mutex};
 mod editor;
 mod files;
 mod midi_out;
+#[cfg(windows)]
+mod share_win;
 
 const MAX_VOICES: usize = 8;
 const HAUNT_SECS: f32 = 0.92;
@@ -233,6 +235,7 @@ pub(crate) struct FaceBus {
     pub midi_t: AtomicU32,
     pub last_pcm: Mutex<Option<(u32, Vec<i16>)>>,
     pub save: Mutex<Option<(String, Vec<u8>)>>,
+    pub last_video: Mutex<Option<std::path::PathBuf>>,
     pub wyrms: Mutex<Vec<KeptWyrm>>,
     pub midi_out: midi_out::SkyMidi,
     pub midi_flush: AtomicBool,
@@ -257,6 +260,7 @@ impl FaceBus {
             midi_t: AtomicU32::new(0),
             last_pcm: Mutex::new(None),
             save: Mutex::new(None),
+            last_video: Mutex::new(None),
             wyrms: Mutex::new(Vec::with_capacity(3)),
             midi_out: midi_out::SkyMidi::new(),
             midi_flush: AtomicBool::new(false),
