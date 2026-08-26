@@ -1,0 +1,1330 @@
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { Circle, Clapperboard, Download, HardDriveDownload, Minus, Plus, Power } from "lucide-react";
+import { SynthEngine, createAudioContext } from "@/lib/synth/engine";
+import { computerKeyOffset } from "@/lib/synth/keyboard-map";
+import { renderSkyForgeClip, CLIP_MAX_SEC, BOUNCE_MAX_SEC } from "@/lib/synth/clip-video";
+import { encodeWav } from "@/lib/synth/wav";
+import { encodeMp3 } from "@/lib/synth/mp3";
+import { encodeMidiFile } from "@/lib/synth/midi-file";
+import { formatDb, formatHz, formatTime, midiToName } from "@/lib/synth/notes";
+import { saveSkyForgeOffline } from "@/lib/synth/offline-file";
+import { PRESETS } from "@/lib/synth/presets";
+import {
+  DEFAULT_PARAMS,
+  PARAM_RANGE,
+  type MidiEvent,
+  type FilterType,
+  type SynthParams,
+  type Waveform,
+} from "@/lib/synth/types";
+import { KIND_VOICE } from "@/lib/synth/kind-voice";
+import type { DragonElement } from "@/lib/synth/dragon-summon";
+import { cn } from "@/lib/utils";
+import { ArmGate } from "./arm-gate";
+import { DragonEtch } from "./dragon-etch";
+import { Knob } from "./knob";
+import { Piano } from "./piano";
+import { LevelMeter, Oscilloscope } from "./scope";
+import { SummonWell } from "./summon-well";
+import { loadWyrms, pushWyrm, type WyrmRecord } from "@/lib/synth/wyrm-log";
+import { WyrmLog, WyrmPreview, WyrmSaveCard } from "./wyrm-log";
+import { FilterBank, KindBank, WaveBank } from "./wave-bank";
+import { TrimDeck, ChassisTube, type TrimMode } from "./trim-deck";
+import {
+  isLiveHost,
+  LiveMeter,
+  onPluginMessage,
+  sendToPlugin,
+  decodeClipChunk,
+  assembleClipPcm,
+  mergeLiveParams,
+  saveToPlugin,
+  type ScopeMeter,
+} from "@/lib/synth/scope-meter";
+import type { ClipTake } from "@/lib/synth/clip-video";
+import { OptionsMenu } from "./options-menu";
+import {
+  loadUserPresets,
+  parseBank,
+  parseBanksJson,
+  SCALE_KEY,
+  serializeBank,
+  slugBank,
+  snapScale,
+  storeUserPresets,
+  type FaceScale,
+  type UserBank,
+} from "@/lib/synth/user-preset";
+
+const KEY_SPAN = 25;
+const BASE_C = 48;
+const HANDLE_KEY = "skyforge.xHandle";
+const SKIN_KEY = "skyforge.skin";
+const TRIM_KEY = "skyforge.trim";
+type ChassisSkin = "forge" | "rack";
+
+function downloadBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.rel = "noopener";
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  window.setTimeout(() => {
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, 4000);
+}
+
+export function ForgeApp() {
+  const engineRef = useRef<SynthEngine | null>(null);
+  const keysHeld = useRef(new Map<string, number>());
+  const sustain = useRef(false);
+  const sustained = useRef(new Set<number>());
+  const clipTimer = useRef(0);
+  const clippingRef = useRef(false);
+  const bounceRef = useRef(false);
+  const [params, setParams] = useState<SynthParams>(DEFAULT_PARAMS);
+  const [armed, setArmed] = useState(false);
+  const [activeNotes, setActiveNotes] = useState<number[]>([]);
+  const [midiOn, setMidiOn] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [clipping, setClipping] = useState(false);
+  const [cutting, setCutting] = useState(false);
+  const [savedMsg, setSavedMsg] = useState("");
+  const [clipSave, setClipSave] = useState<{
+    url: string;
+    name: string;
+    thumb: string;
+    epithet: string;
+    element: string;
+    stem: string;
+    samples: Float32Array | null;
+    sampleRate: number;
+    fromHistory: boolean;
+  } | null>(null);
+  const [wyrmLog, setWyrmLog] = useState<WyrmRecord[]>([]);
+  const clipBlobs = useRef(
+    new Map<
+      string,
+      {
+        url: string;
+        name: string;
+        stem: string;
+        samples: Float32Array;
+        sampleRate: number;
+      }
+    >(),
+  );
+  const [presetId, setPresetId] = useState("init");
+  const [analyser, setAnalyser] = useState<ScopeMeter | null>(null);
+  const [xHandle, setXHandle] = useState("");
+  const [skin, setSkin] = useState<ChassisSkin>("forge");
+  const [trim, setTrim] = useState<TrimMode>("off");
+  const [kindLock, setKindLock] = useState<DragonElement | null>(null);
+  const [scale, setScale] = useState<FaceScale>(1);
+  const [userPresets, setUserPresets] = useState<UserBank[]>([]);
+  const xHandleRef = useRef(xHandle);
+  const skinRef = useRef(skin);
+  const trimRef = useRef(trim);
+  const kindLockRef = useRef(kindLock);
+  const presetIdRef = useRef(presetId);
+  const wyrmLogRef = useRef(wyrmLog);
+  xHandleRef.current = xHandle;
+  skinRef.current = skin;
+  trimRef.current = trim;
+  kindLockRef.current = kindLock;
+  presetIdRef.current = presetId;
+  wyrmLogRef.current = wyrmLog;
+  const clipAcc = useRef<{ sr: number; n: number; parts: Int16Array[]; mode: "bounce" | "wyrm" } | null>(null);
+  const finishTakeRef = useRef<(take: ClipTake) => Promise<void>>(async () => {});
+  const liveReadyRef = useRef(!isLiveHost());
+
+  const startMidi = BASE_C + params.octave * 12;
+
+  const pushFace = (partial?: {
+    skin?: ChassisSkin;
+    trim?: TrimMode;
+    handle?: string;
+    kind?: DragonElement | null;
+    preset?: string;
+    scale?: FaceScale;
+    banks?: string;
+  }) => {
+    if (!isLiveHost()) return;
+    if (partial?.skin !== undefined) skinRef.current = partial.skin;
+    if (partial?.trim !== undefined) trimRef.current = partial.trim;
+    if (partial?.handle !== undefined) xHandleRef.current = partial.handle;
+    if (partial && "kind" in partial) kindLockRef.current = partial.kind ?? null;
+    if (partial?.preset !== undefined) presetIdRef.current = partial.preset;
+    sendToPlugin({
+      type: "Face",
+      skin: skinRef.current,
+      trim: trimRef.current,
+      handle: xHandleRef.current,
+      kind: kindLockRef.current ?? "free",
+      preset: presetIdRef.current,
+      scale: partial?.scale ?? scale,
+      banks: partial?.banks,
+    });
+  };
+
+  const patch = useCallback((partial: Partial<SynthParams>) => {
+    setParams((prev) => {
+      const next = { ...prev, ...partial };
+      if (isLiveHost()) {
+        if (liveReadyRef.current) sendToPlugin({ type: "Patch", params: next });
+      } else {
+        engineRef.current?.setParams(next);
+      }
+      return next;
+    });
+    if (!isLiveHost() || liveReadyRef.current) setPresetId("custom");
+  }, []);
+
+  const paramsRef = useRef(params);
+  paramsRef.current = params;
+
+  const arm = useCallback(() => {
+    try {
+      flushSync(() => setArmed(true));
+    } catch {
+      setArmed(true);
+    }
+    try {
+      if (isLiveHost()) return;
+      if (!engineRef.current) {
+        const ctx = createAudioContext();
+        void ctx.resume();
+        const engine = new SynthEngine(ctx);
+        engine.setParams(paramsRef.current);
+        engine.setKind(kindLockRef.current);
+        engine.onNotes = setActiveNotes;
+        engineRef.current = engine;
+        setAnalyser(engine.analyser as ScopeMeter);
+        void ctx.resume();
+      } else {
+        void engineRef.current.resume();
+      }
+    } catch {
+      /* overlay is already gone; next tap retries audio */
+    }
+  }, []);
+
+  const ensureEngine = useCallback(async () => {
+    arm();
+    const engine = engineRef.current;
+    if (!engine) throw new Error("Audio engine failed to start");
+    await engine.resume();
+    return engine;
+  }, [arm]);
+
+  const noteOn = useCallback(
+    async (midi: number, velocity = 0.85) => {
+      if (isLiveHost()) {
+        sendToPlugin({ type: "NoteOn", note: midi, vel: velocity });
+        setActiveNotes((n) => (n.includes(midi) ? n : [...n, midi]));
+        return;
+      }
+      const engine = await ensureEngine();
+      engine.noteOn(midi, velocity);
+    },
+    [ensureEngine],
+  );
+
+  const noteOff = useCallback((midi: number) => {
+    if (sustain.current) {
+      sustained.current.add(midi);
+      return;
+    }
+    if (isLiveHost()) {
+      sendToPlugin({ type: "NoteOff", note: midi });
+      setActiveNotes((n) => n.filter((x) => x !== midi));
+      return;
+    }
+    engineRef.current?.noteOff(midi);
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.isContentEditable)) {
+        return;
+      }
+      if (e.code === "Space") {
+        e.preventDefault();
+        sustain.current = true;
+        return;
+      }
+      if (e.key === "[" || e.key === "-") {
+        e.preventDefault();
+        patch({ octave: Math.max(PARAM_RANGE.octave.min, params.octave - 1) });
+        return;
+      }
+      if (e.key === "]" || e.key === "=") {
+        e.preventDefault();
+        patch({ octave: Math.min(PARAM_RANGE.octave.max, params.octave + 1) });
+        return;
+      }
+      const offset = computerKeyOffset(e.key);
+      if (offset === undefined) return;
+      e.preventDefault();
+      if (keysHeld.current.has(e.key)) return;
+      const midi = BASE_C + params.octave * 12 + offset;
+      keysHeld.current.set(e.key, midi);
+      void noteOn(midi);
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") {
+        e.preventDefault();
+        sustain.current = false;
+        for (const midi of sustained.current) {
+          if (isLiveHost()) {
+            sendToPlugin({ type: "NoteOff", note: midi });
+            setActiveNotes((n) => n.filter((x) => x !== midi));
+          } else {
+            engineRef.current?.noteOff(midi);
+          }
+        }
+        sustained.current.clear();
+        return;
+      }
+      const midi = keysHeld.current.get(e.key);
+      if (midi === undefined) return;
+      keysHeld.current.delete(e.key);
+      noteOff(midi);
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("keyup", onKeyUp, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("keyup", onKeyUp, true);
+    };
+  }, [noteOff, noteOn, params.octave, patch]);
+
+  useLayoutEffect(() => {
+    if (!isLiveHost()) return;
+    document.documentElement.dataset.live = "1";
+    const meter = new LiveMeter();
+    setAnalyser(meter);
+    setArmed(true);
+    let gotState = false;
+    onPluginMessage((msg) => {
+      if (msg.type === "state") {
+        gotState = true;
+        liveReadyRef.current = true;
+        setParams((prev) => mergeLiveParams(prev, msg.params));
+        if (msg.skin === "rack" || msg.skin === "forge") setSkin(msg.skin);
+        if (msg.trim === "plasma" || msg.trim === "purple" || msg.trim === "green" || msg.trim === "off") {
+          setTrim(msg.trim);
+        }
+        if (typeof msg.handle === "string") {
+          setXHandle(msg.handle.replace(/^@+/, "").replace(/[^A-Za-z0-9_]/g, "").slice(0, 15));
+        }
+        const kind = (msg.kind ?? "").toUpperCase();
+        if (kind === "EARTH" || kind === "WATER" || kind === "FIRE" || kind === "WIND") {
+          setKindLock(kind);
+          engineRef.current?.setKind(kind);
+        } else {
+          setKindLock(null);
+          engineRef.current?.setKind(null);
+        }
+        if (typeof msg.preset === "string" && msg.preset) setPresetId(msg.preset);
+        if (typeof msg.scale === "number") setScale(snapScale(msg.scale));
+        if (typeof msg.banks === "string" && msg.banks) {
+          setUserPresets(parseBanksJson(msg.banks, paramsRef.current));
+        }
+        if (msg.rec === "bounce") {
+          bounceRef.current = true;
+          clippingRef.current = false;
+          setRecording(true);
+          setClipping(false);
+        } else if (msg.rec === "wyrm") {
+          bounceRef.current = false;
+          clippingRef.current = true;
+          setClipping(true);
+          setRecording(false);
+        }
+        return;
+      }
+      if (msg.type === "saved") {
+        bounceRef.current = false;
+        setRecording(false);
+        setSavedMsg(msg.ok ? `Saved · ${msg.name}` : "Could not save");
+        window.setTimeout(() => setSavedMsg(""), 5000);
+        return;
+      }
+      if (msg.type === "wyrms") {
+        setWyrmLog(
+          msg.log.map((w) => ({
+            id: w.id,
+            epithet: w.epithet,
+            element: (w.element as DragonElement) || "FIRE",
+            at: w.at,
+            name: w.name,
+            thumb: w.thumb,
+            stem: w.stem,
+          })),
+        );
+        return;
+      }
+      if (msg.type === "meter") {
+        meter.ingest(msg.scope);
+        meter.tick();
+        setActiveNotes(msg.notes);
+        return;
+      }
+      if (msg.type !== "clip") return;
+      if (msg.phase === "begin") {
+        clipAcc.current = {
+          sr: msg.sr,
+          n: msg.n,
+          parts: [],
+          mode: msg.mode === "bounce" ? "bounce" : "wyrm",
+        };
+        return;
+      }
+      if (msg.phase === "chunk") {
+        const acc = clipAcc.current;
+        if (!acc) return;
+        acc.parts.push(decodeClipChunk(msg.data));
+        return;
+      }
+      if (msg.phase === "end") {
+        const acc = clipAcc.current;
+        clipAcc.current = null;
+        const bounce = acc?.mode === "bounce" || bounceRef.current;
+        bounceRef.current = false;
+        setRecording(false);
+        setClipping(false);
+        if (!acc || acc.n < 1) {
+          setCutting(false);
+          return;
+        }
+        const samples = assembleClipPcm(acc.parts, acc.n);
+        if (bounce) {
+          const wav = encodeWav(samples, acc.sr);
+          if (isLiveHost()) {
+            void saveToPlugin(`skyforge-bounce-${Date.now()}.wav`, wav);
+          } else {
+            downloadBlob(wav, "skyforge-bounce.wav");
+          }
+          setSavedMsg("Saved · bounce WAV");
+          window.setTimeout(() => setSavedMsg(""), 5000);
+          setCutting(false);
+          return;
+        }
+        void finishTakeRef.current({ samples, sampleRate: acc.sr });
+      }
+    });
+    sendToPlugin({ type: "Init" });
+    const retry = window.setInterval(() => {
+      if (gotState) {
+        window.clearInterval(retry);
+        return;
+      }
+      sendToPlugin({ type: "Init" });
+    }, 160);
+    const giveUp = window.setTimeout(() => {
+      window.clearInterval(retry);
+      liveReadyRef.current = true;
+    }, 4000);
+    return () => {
+      window.clearInterval(retry);
+      window.clearTimeout(giveUp);
+      onPluginMessage(() => {});
+      delete document.documentElement.dataset.live;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (armed) return;
+    const onFirst = (e: PointerEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest("[data-offline-download]")) return;
+      arm();
+    };
+    window.addEventListener("pointerdown", onFirst, { capture: true });
+    window.addEventListener("touchstart", onFirst as EventListener, { capture: true, passive: true });
+    return () => {
+      window.removeEventListener("pointerdown", onFirst, { capture: true });
+      window.removeEventListener("touchstart", onFirst as EventListener, { capture: true });
+    };
+  }, [armed, arm]);
+
+  useEffect(() => {
+    const kick = () => {
+      void engineRef.current?.resume();
+    };
+    window.addEventListener("pointerdown", kick, { capture: true });
+    window.addEventListener("keydown", kick, { capture: true });
+    return () => {
+      window.removeEventListener("pointerdown", kick, { capture: true });
+      window.removeEventListener("keydown", kick, { capture: true });
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!armed || isLiveHost()) return;
+    let access: MIDIAccess | null = null;
+    const bind = (a: MIDIAccess) => {
+      access = a;
+      const handle = (ev: MIDIMessageEvent) => {
+        const data = ev.data;
+        if (!data || data.length < 2) return;
+        const status = data[0]! & 0xf0;
+        const midi = data[1]!;
+        const vel = (data[2] ?? 0) / 127;
+        if (status === 0x90 && vel > 0) void noteOn(midi, vel);
+        else if (status === 0x80 || (status === 0x90 && vel === 0)) noteOff(midi);
+      };
+      const hook = () => {
+        for (const input of a.inputs.values()) input.onmidimessage = handle;
+      };
+      hook();
+      a.onstatechange = hook;
+      setMidiOn(a.inputs.size > 0);
+    };
+    if (!navigator.requestMIDIAccess) return;
+    navigator.requestMIDIAccess().then(bind).catch(() => setMidiOn(false));
+    return () => {
+      if (!access) return;
+      for (const input of access.inputs.values()) input.onmidimessage = null;
+    };
+  }, [armed, noteOff, noteOn]);
+
+  const applyPreset = (id: string) => {
+    const mine = userPresets.find((p) => p.id === id);
+    if (mine) {
+      applyUserBank(mine);
+      return;
+    }
+    const preset = PRESETS.find((p) => p.id === id);
+    if (!preset) return;
+    setParams(preset.params);
+    if (isLiveHost()) {
+      sendToPlugin({ type: "Patch", params: preset.params });
+      setPresetId(id);
+      pushFace({ preset: id });
+    } else {
+      engineRef.current?.setParams(preset.params);
+      setPresetId(id);
+    }
+  };
+
+  const applyUserBank = (bank: UserBank) => {
+    setParams(bank.params);
+    setSkin(bank.skin);
+    setTrim(bank.trim);
+    setKindLock(bank.kind);
+    setPresetId(bank.id);
+    if (isLiveHost()) {
+      sendToPlugin({ type: "Patch", params: bank.params });
+      pushFace({
+        skin: bank.skin,
+        trim: bank.trim,
+        kind: bank.kind,
+        preset: bank.id,
+      });
+    } else {
+      engineRef.current?.setParams(bank.params);
+      engineRef.current?.setKind(bank.kind);
+      try {
+        localStorage.setItem(SKIN_KEY, bank.skin);
+        localStorage.setItem(TRIM_KEY, bank.trim);
+      } catch {
+        /* private */
+      }
+    }
+  };
+
+  const saveUserBank = (name: string) => {
+    const bank: UserBank = {
+      skyforge: 1,
+      id: `u-${slugBank(name)}-${Date.now().toString(36)}`,
+      name,
+      params: { ...paramsRef.current },
+      skin: skinRef.current,
+      trim: trimRef.current,
+      kind: kindLockRef.current,
+    };
+    const next = [bank, ...userPresets.filter((b) => b.id !== bank.id && b.name !== bank.name)].slice(0, 24);
+    setUserPresets(next);
+    storeUserPresets(next);
+    setPresetId(bank.id);
+    const file = new Blob([serializeBank(bank)], { type: "application/json" });
+    const fileName = `skyforge-${slugBank(name)}.json`;
+    if (isLiveHost()) {
+      pushFace({ preset: bank.id, banks: JSON.stringify(next) });
+      void saveToPlugin(fileName, file);
+    } else {
+      downloadBlob(file, fileName);
+    }
+  };
+
+  const loadUserBankFile = async (file: File) => {
+    try {
+      const raw = JSON.parse(await file.text()) as unknown;
+      const bank = parseBank(raw, paramsRef.current);
+      if (!bank) return;
+      applyUserBank(bank);
+      const next = [bank, ...userPresets.filter((b) => b.id !== bank.id)].slice(0, 24);
+      setUserPresets(next);
+      storeUserPresets(next);
+      if (isLiveHost()) pushFace({ banks: JSON.stringify(next), preset: bank.id });
+    } catch {
+      /* ignore bad file */
+    }
+  };
+
+  const changeScale = (next: FaceScale) => {
+    setScale(next);
+    document.documentElement.style.setProperty("--face-scale", String(next));
+    if (isLiveHost()) sendToPlugin({ type: "Scale", factor: next });
+    else {
+      try {
+        localStorage.setItem(SCALE_KEY, String(next));
+      } catch {
+        /* private */
+      }
+    }
+  };
+
+  const toggleRecord = async () => {
+    if (clipping || cutting) return;
+    if (isLiveHost()) {
+      if (recording) {
+        bounceRef.current = true;
+        window.clearTimeout(clipTimer.current);
+        setRecording(false);
+        sendToPlugin({ type: "ClipStop" });
+        return;
+      }
+      bounceRef.current = true;
+      clippingRef.current = false;
+      clipAcc.current = null;
+      sendToPlugin({ type: "ClipStart", mode: "bounce" });
+      setRecording(true);
+      window.clearTimeout(clipTimer.current);
+      clipTimer.current = window.setTimeout(() => {
+        document.getElementById("skyforge-bounce")?.click();
+      }, BOUNCE_MAX_SEC * 1000);
+      return;
+    }
+    const engine = await ensureEngine();
+    if (recording) {
+      const wav = engine.stopRecording();
+      setRecording(false);
+      if (wav) downloadBlob(wav, "skyforge-bounce.wav");
+      return;
+    }
+    const ok = await engine.startRecording();
+    if (ok) setRecording(true);
+  };
+
+  const finishTake = useCallback(async (take: ClipTake) => {
+    if (!take.samples.length) {
+      setCutting(false);
+      setClipping(false);
+      return;
+    }
+    setCutting(true);
+    try {
+      const file = await renderSkyForgeClip(
+        take,
+        xHandleRef.current,
+        kindLockRef.current,
+        skinRef.current,
+      );
+      const hasVideo = file.blob.size > 2000;
+      const url = hasVideo ? URL.createObjectURL(file.blob) : "";
+      setClipSave({
+        url,
+        name: file.name,
+        thumb: file.thumb,
+        epithet: file.epithet,
+        element: file.element,
+        stem: file.stem,
+        samples: file.samples,
+        sampleRate: file.sampleRate,
+        fromHistory: false,
+      });
+      const { log, id } = await pushWyrm(
+        {
+          epithet: file.epithet,
+          element: file.element,
+          name: file.name,
+          thumb: file.thumb,
+          stem: file.stem,
+        },
+        { video: file.blob, samples: file.samples, sampleRate: file.sampleRate },
+        wyrmLogRef.current,
+      );
+      setWyrmLog(log);
+      const stale = [...clipBlobs.current.keys()].filter((k) => !log.some((w) => w.id === k));
+      for (const k of stale) {
+        const old = clipBlobs.current.get(k);
+        if (old) URL.revokeObjectURL(old.url);
+        clipBlobs.current.delete(k);
+      }
+      clipBlobs.current.set(id, {
+        url,
+        name: file.name,
+        stem: file.stem,
+        samples: file.samples,
+        sampleRate: file.sampleRate,
+      });
+      if (isLiveHost()) {
+        sendToPlugin({
+          type: "WyrmKeep",
+          id,
+          epithet: file.epithet,
+          element: file.element,
+          at: Date.now(),
+          name: file.name,
+          thumb: file.thumb,
+          stem: file.stem,
+        });
+        if (hasVideo) await saveToPlugin(file.name, file.blob);
+      }
+    } catch {
+      /* WAV bounce still works */
+    } finally {
+      setCutting(false);
+    }
+  }, []);
+  finishTakeRef.current = finishTake;
+
+  const toggleClip = async () => {
+    if (recording && !clipping) return;
+    if (isLiveHost()) {
+      if (clippingRef.current) {
+        clippingRef.current = false;
+        window.clearTimeout(clipTimer.current);
+        setClipping(false);
+        setCutting(true);
+        sendToPlugin({ type: "ClipStop" });
+        return;
+      }
+      clipAcc.current = null;
+      sendToPlugin({ type: "ClipStart", mode: "wyrm" });
+      clippingRef.current = true;
+      setClipping(true);
+      window.clearTimeout(clipTimer.current);
+      clipTimer.current = window.setTimeout(() => {
+        document.getElementById("skyforge-clip")?.click();
+      }, CLIP_MAX_SEC * 1000);
+      return;
+    }
+    const engine = await ensureEngine();
+    if (clippingRef.current) {
+      clippingRef.current = false;
+      window.clearTimeout(clipTimer.current);
+      const take = engine.stopRecordingPcm();
+      setClipping(false);
+      if (!take || take.samples.length < engine.sampleRate * 0.15) {
+        setCutting(false);
+        return;
+      }
+      await finishTake(take);
+      return;
+    }
+    const ok = await engine.startRecording();
+    if (ok) {
+      clippingRef.current = true;
+      setClipping(true);
+      window.clearTimeout(clipTimer.current);
+      clipTimer.current = window.setTimeout(() => {
+        document.getElementById("skyforge-clip")?.click();
+      }, CLIP_MAX_SEC * 1000);
+    }
+  };
+
+  const exportMidi = () => {
+    if (isLiveHost()) {
+      sendToPlugin({ type: "MidiDump" });
+      return;
+    }
+    const engine = engineRef.current;
+    if (!engine || engine.midiLog.length === 0) return;
+    const blob = encodeMidiFile(engine.midiLog);
+    downloadBlob(blob, "skyforge-clip.mid");
+  };
+
+  const downloadOffline = () => {
+    saveSkyForgeOffline();
+  };
+
+  useEffect(() => {
+    if (isLiveHost()) return;
+    try {
+      const saved = localStorage.getItem(HANDLE_KEY);
+      if (saved) setXHandle(saved);
+      const skinSaved = localStorage.getItem(SKIN_KEY);
+      if (skinSaved === "rack" || skinSaved === "forge") setSkin(skinSaved);
+      const trimSaved = localStorage.getItem(TRIM_KEY);
+      if (trimSaved === "plasma" || trimSaved === "purple" || trimSaved === "green" || trimSaved === "off") {
+        setTrim(trimSaved);
+      }
+      const scaleSaved = localStorage.getItem(SCALE_KEY);
+      if (scaleSaved) setScale(snapScale(Number(scaleSaved)));
+    } catch {
+      /* private mode */
+    }
+    setUserPresets(loadUserPresets());
+    void loadWyrms().then(({ log, blobs }) => {
+      clipBlobs.current = blobs;
+      setWyrmLog(log);
+    });
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.skin = skin;
+  }, [skin]);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty("--face-scale", String(scale));
+  }, [scale]);
+
+  const onHandleChange = (raw: string) => {
+    const clean = raw.replace(/^@+/, "").replace(/[^A-Za-z0-9_]/g, "").slice(0, 15);
+    setXHandle(clean);
+    if (isLiveHost()) {
+      pushFace({ handle: clean });
+      return;
+    }
+    try {
+      localStorage.setItem(HANDLE_KEY, clean);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const noteLabel = useMemo(() => {
+    if (activeNotes.length === 0) return "—";
+    return [...activeNotes].sort((a, b) => a - b).map(midiToName).join("  ");
+  }, [activeNotes]);
+
+  return (
+    <main
+      className="live-stage studio-bg relative"
+      data-skin={skin}
+    >
+      <h1 className="sr-only">SkyForge analog synthesizer by johnnyskyride</h1>
+      {!armed && !isLiveHost() ? <ArmGate onArm={arm} /> : null}
+      <section
+        className="forge-chassis relative mx-auto w-full max-w-5xl"
+        data-haunt={params.halloween > 0.4 ? "1" : "0"}
+        data-tide={params.waters > 0.42 ? "1" : "0"}
+        data-skin={skin}
+        data-trim={skin === "forge" ? trim : "off"}
+      >
+          <ChassisTube />
+          <span className="chassis-screw tl" aria-hidden />
+          <span className="chassis-screw tr" aria-hidden />
+          <span className="chassis-screw bl" aria-hidden />
+          <span className="chassis-screw br" aria-hidden />
+          <header className="chassis-head flex flex-wrap items-center gap-3 px-4 py-2.5 sm:px-5">
+            <button
+              type="button"
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                arm();
+              }}
+              onClick={() => arm()}
+              className={cn("power-led relative z-10", armed && "is-on")}
+              aria-pressed={armed}
+              aria-label={armed ? "Audio armed" : "Arm audio"}
+            >
+              <Power className="size-4" strokeWidth={1.75} />
+            </button>
+            <div className="min-w-0 flex-1">
+              <p className="font-mono text-2xs tracking-[0.18em] text-muted">
+                <span className="uppercase">SF-33</span>
+                <span className="text-subtle"> · </span>
+                <span className="normal-case tracking-wide">@johnnyskyride</span>
+                {savedMsg ? (
+                  <span className="ml-2 tracking-[0.12em] text-led">{savedMsg}</span>
+                ) : (
+                  <span
+                    className={cn(
+                      "ml-2 inline-flex items-center gap-1 tracking-[0.16em]",
+                      midiOn ? "text-led" : "text-subtle",
+                    )}
+                  >
+                    <Circle className="size-2 fill-current" />
+                    Midi
+                  </span>
+                )}
+              </p>
+            </div>
+            <OptionsMenu
+              scale={scale}
+              onScale={changeScale}
+              userPresets={userPresets}
+              onSave={saveUserBank}
+              onLoadFile={(file) => void loadUserBankFile(file)}
+              onPickUser={(id) => applyPreset(id)}
+            />
+            <label className="sr-only" htmlFor="forge-preset">
+              Preset
+            </label>
+            <select
+              id="forge-preset"
+              value={PRESETS.some((p) => p.id === presetId) || userPresets.some((p) => p.id === presetId) ? presetId : "init"}
+              onChange={(e) => applyPreset(e.target.value)}
+              className="preset-select"
+            >
+              <optgroup label="Forge">
+                {PRESETS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </optgroup>
+              {userPresets.length > 0 ? (
+                <optgroup label="Yours">
+                  {userPresets.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+            </select>
+            <button
+              id="skyforge-bounce"
+              type="button"
+              onClick={() => void toggleRecord()}
+              disabled={clipping || cutting}
+              className={cn("header-btn", recording && "is-rec")}
+            >
+              <Circle className={cn("size-3", recording ? "fill-clip text-clip" : "fill-current")} />
+              {recording ? "Stop" : "Bounce"}
+            </button>
+            <label className="header-handle">
+              <span className="sr-only">X username for Ear Wyrm</span>
+              <span aria-hidden>@</span>
+              <input
+                type="text"
+                value={xHandle}
+                onChange={(e) => onHandleChange(e.target.value)}
+                placeholder="you"
+                autoComplete="username"
+                spellCheck={false}
+                maxLength={15}
+              />
+            </label>
+            <button
+              id="skyforge-clip"
+              type="button"
+              onClick={() => void toggleClip()}
+              disabled={recording || cutting}
+              className={cn("header-btn", (clipping || cutting) && "is-rec")}
+            >
+              <Clapperboard className="size-3.5" />
+              {cutting ? "Cut…" : clipping ? "Stop" : "Ear Wyrm"}
+            </button>
+            <button type="button" onClick={exportMidi} className="header-btn hidden sm:inline-flex">
+              <Download className="size-3.5" />
+              MIDI
+            </button>
+            <button
+              type="button"
+              className={cn("header-btn", skin === "rack" && "is-on")}
+              onClick={() => {
+                const next: ChassisSkin = skin === "rack" ? "forge" : "rack";
+                setSkin(next);
+                if (isLiveHost()) {
+                  pushFace({ skin: next });
+                  return;
+                }
+                try {
+                  localStorage.setItem(SKIN_KEY, next);
+                } catch {
+                  /* private */
+                }
+              }}
+            >
+              {skin === "rack" ? "Forge" : "Rack"}
+            </button>
+            {!isLiveHost() ? (
+            <button
+              type="button"
+              data-offline-download
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                downloadOffline();
+              }}
+              className="header-btn"
+            >
+              <HardDriveDownload className="size-3.5" />
+              Offline
+            </button>
+            ) : null}
+          </header>
+          <div className="wyrm-stage">
+          {clipSave && !clipSave.fromHistory ? (
+            <WyrmPreview
+              epithet={clipSave.epithet}
+              element={clipSave.element}
+              url={clipSave.url}
+              thumb={clipSave.thumb}
+              onClose={() => setClipSave(null)}
+            />
+          ) : null}
+          {clipSave?.fromHistory ? (
+            <WyrmSaveCard
+              epithet={clipSave.epithet}
+              element={clipSave.element}
+              thumb={clipSave.thumb}
+              url={clipSave.url}
+              name={clipSave.name}
+              canAudio={!!clipSave.samples && clipSave.samples.length > 0}
+              onClose={() => setClipSave(null)}
+              onShare={() => {
+                const text = `${clipSave.epithet} · ${clipSave.element}\nEar Wyrm — SkyForge SF-33`;
+                window.open(
+                  `https://x.com/intent/post?text=${encodeURIComponent(text)}`,
+                  "_blank",
+                  "noopener,noreferrer",
+                );
+              }}
+              onWav={() => {
+                if (isLiveHost()) {
+                  sendToPlugin({ type: "SaveWav", stem: clipSave.stem });
+                  return;
+                }
+                if (!clipSave.samples) return;
+                downloadBlob(encodeWav(clipSave.samples, clipSave.sampleRate), `${clipSave.stem}.wav`);
+              }}
+              onMp3={() => {
+                if (!clipSave.samples) return;
+                const blob = encodeMp3(clipSave.samples, clipSave.sampleRate);
+                if (isLiveHost()) {
+                  void saveToPlugin(`${clipSave.stem}.mp3`, blob);
+                  return;
+                }
+                downloadBlob(blob, `${clipSave.stem}.mp3`);
+              }}
+            />
+          ) : null}
+          <div className="wyrm-bar">
+            <WyrmLog
+              log={wyrmLog}
+              onOpen={(entry) => {
+                const blob = clipBlobs.current.get(entry.id);
+                setClipSave({
+                  url: blob?.url ?? "",
+                  name: blob?.name ?? entry.name,
+                  thumb: entry.thumb,
+                  epithet: entry.epithet,
+                  element: entry.element,
+                  stem: blob?.stem ?? entry.name.replace(/\.[^.]+$/, ""),
+                  samples: blob?.samples ?? null,
+                  sampleRate: blob?.sampleRate ?? 44100,
+                  fromHistory: true,
+                });
+              }}
+            />
+            <span className="nameplate">
+              <DragonEtch variant="mark" className="h-5 w-8 shrink-0" />
+              <p className="font-sans text-lg font-medium tracking-tight text-fg">SkyForge</p>
+              <DragonEtch variant="mark" className="h-5 w-8 shrink-0 -scale-x-100" />
+            </span>
+          </div>
+          </div>
+
+          <div className="panel-deck grid gap-3 px-4 py-3 sm:px-5 md:grid-cols-2">
+            <div className="flex gap-3">
+              <Oscilloscope analyser={analyser} armed={armed} className="min-h-20 flex-1 sm:min-h-28" />
+              <LevelMeter analyser={analyser} armed={armed} />
+            </div>
+
+            <WaveBank
+              value={params.waveform}
+              onChange={(waveform: Waveform) => patch({ waveform })}
+            />
+          </div>
+
+          <div className="panel-row flex flex-wrap items-end gap-x-2 gap-y-1 px-4 py-2 sm:px-5">
+            <div className="flex flex-col gap-1 pb-1">
+              <span className="font-mono text-2xs font-medium uppercase tracking-[0.16em] text-muted">
+                Filter
+              </span>
+              <FilterBank
+                value={params.filterType}
+                onChange={(filterType: FilterType) => patch({ filterType })}
+              />
+            </div>
+            <Knob
+              compact
+              tone="emerald"
+              label="Cutoff"
+              value={params.cutoff}
+              min={PARAM_RANGE.cutoff.min}
+              max={PARAM_RANGE.cutoff.max}
+              log
+              format={formatHz}
+              defaultValue={DEFAULT_PARAMS.cutoff}
+              onChange={(cutoff) => patch({ cutoff })}
+            />
+            <Knob
+              compact
+              tone="emerald"
+              label="Reso"
+              value={params.resonance}
+              min={PARAM_RANGE.resonance.min}
+              max={PARAM_RANGE.resonance.max}
+              format={(v) => v.toFixed(1)}
+              defaultValue={DEFAULT_PARAMS.resonance}
+              onChange={(resonance) => patch({ resonance })}
+            />
+            <KindBank
+              variant={skin}
+              value={kindLock}
+              onChange={(kind) => {
+                setKindLock(kind);
+                if (kind) patch(KIND_VOICE[kind]);
+                engineRef.current?.setKind(kind);
+                pushFace({ kind });
+              }}
+            />
+            <SummonWell
+              analyser={analyser}
+              armed={armed}
+              kind={kindLock}
+              className="mb-0.5 ml-4 h-[5.75rem] w-72 min-w-72 flex-none sm:ml-5 sm:w-80 sm:min-w-80"
+            />
+            {params.waveform === "pulse" ? (
+              <Knob
+                compact
+                tone="emerald"
+                label="Width"
+                value={params.pulseWidth}
+                min={PARAM_RANGE.pulseWidth.min}
+                max={PARAM_RANGE.pulseWidth.max}
+                format={(v) => `${Math.round(v * 100)}%`}
+                defaultValue={DEFAULT_PARAMS.pulseWidth}
+                onChange={(pulseWidth) => patch({ pulseWidth })}
+              />
+            ) : null}
+            <div className="ml-auto flex items-center gap-1 pb-2">
+              <button
+                type="button"
+                className="oct-btn"
+                aria-label="Octave down"
+                onClick={() =>
+                  patch({ octave: Math.max(PARAM_RANGE.octave.min, params.octave - 1) })
+                }
+              >
+                <Minus className="size-4" />
+              </button>
+              <span className="w-8 text-center font-mono text-sm tabular-nums text-fg">
+                {params.octave > 0 ? `+${params.octave}` : params.octave}
+              </span>
+              <button
+                type="button"
+                className="oct-btn"
+                aria-label="Octave up"
+                onClick={() =>
+                  patch({ octave: Math.min(PARAM_RANGE.octave.max, params.octave + 1) })
+                }
+              >
+                <Plus className="size-4" />
+              </button>
+            </div>
+          </div>
+
+          <div
+            className={cn(
+              "piano-dock border-t border-border bg-chassis px-3 py-2.5 sm:px-4",
+              !armed && "max-sm:hidden",
+            )}
+          >
+            <div className="mb-1.5 flex items-center justify-between gap-3">
+              <p className={cn("font-mono text-2xs uppercase tracking-[0.16em]", armed ? "text-pearl" : "text-muted")}>
+                {armed ? "Live" : "Standby"} · {noteLabel}
+              </p>
+              <p className="hidden font-mono text-2xs text-subtle sm:block">
+                Z–M lower · Q–P upper · space sustain
+              </p>
+            </div>
+            <div className="mb-2 flex items-end gap-1 overflow-x-auto sm:gap-2">
+              <span className="hidden pb-6 font-mono text-2xs font-medium uppercase tracking-[0.16em] text-pearl sm:block">
+                Env
+              </span>
+              <Knob
+                compact
+                tone="pearl"
+                label="Attack"
+                value={params.attack}
+                min={PARAM_RANGE.attack.min}
+                max={PARAM_RANGE.attack.max}
+                log
+                format={formatTime}
+                defaultValue={DEFAULT_PARAMS.attack}
+                onChange={(attack) => patch({ attack })}
+              />
+              <Knob
+                compact
+                tone="pearl"
+                label="Decay"
+                value={params.decay}
+                min={PARAM_RANGE.decay.min}
+                max={PARAM_RANGE.decay.max}
+                log
+                format={formatTime}
+                defaultValue={DEFAULT_PARAMS.decay}
+                onChange={(decay) => patch({ decay })}
+              />
+              <Knob
+                compact
+                tone="pearl"
+                label="Sustain"
+                value={params.sustain}
+                min={PARAM_RANGE.sustain.min}
+                max={PARAM_RANGE.sustain.max}
+                format={(v) => v.toFixed(2)}
+                defaultValue={DEFAULT_PARAMS.sustain}
+                onChange={(sustainVal) => patch({ sustain: sustainVal })}
+              />
+              <Knob
+                compact
+                tone="pearl"
+                label="Release"
+                value={params.release}
+                min={PARAM_RANGE.release.min}
+                max={PARAM_RANGE.release.max}
+                log
+                format={formatTime}
+                defaultValue={DEFAULT_PARAMS.release}
+                onChange={(release) => patch({ release })}
+              />
+              <Knob
+                compact
+                tone="pearl"
+                label="Volume"
+                value={params.volume}
+                min={PARAM_RANGE.volume.min}
+                max={PARAM_RANGE.volume.max}
+                format={formatDb}
+                defaultValue={DEFAULT_PARAMS.volume}
+                onChange={(volume) => patch({ volume })}
+              />
+              <Knob
+                compact
+                tone="pearl"
+                label="Unison"
+                value={params.unison}
+                min={PARAM_RANGE.unison.min}
+                max={PARAM_RANGE.unison.max}
+                format={(v) => `${Math.round(v)}`}
+                defaultValue={DEFAULT_PARAMS.unison}
+                onChange={(unison) => patch({ unison: Math.max(1, Math.min(3, Math.round(unison))) })}
+              />
+              <div className="ml-4 flex shrink-0 gap-1 sm:ml-6 sm:gap-2">
+                <Knob
+                  compact
+                  label="Waters"
+                  value={params.waters}
+                  min={PARAM_RANGE.waters.min}
+                  max={PARAM_RANGE.waters.max}
+                  format={(v) => (v < 0.01 ? "off" : `${Math.round(v * 100)}`)}
+                  defaultValue={0}
+                  tone="tide"
+                  onChange={(waters) => patch({ waters })}
+                />
+                <div className="haunt-stack">
+                  {skin === "rack" ? <HauntSpider /> : null}
+                  <Knob
+                    compact
+                    label="Halloween"
+                    value={params.halloween}
+                    min={PARAM_RANGE.halloween.min}
+                    max={PARAM_RANGE.halloween.max}
+                    format={(v) => (v < 0.01 ? "off" : `${Math.round(v * 100)}`)}
+                    defaultValue={0}
+                    tone="ghost"
+                    labelTone="haunt"
+                    onChange={(halloween) => patch({ halloween })}
+                  />
+                </div>
+                <Knob
+                  compact
+                  label="Aether"
+                  value={params.aether}
+                  min={PARAM_RANGE.aether.min}
+                  max={PARAM_RANGE.aether.max}
+                  format={(v) => (v < 0.01 ? "off" : `${Math.round(v * 100)}`)}
+                  defaultValue={0}
+                  tone="aether"
+                  onChange={(aether) => patch({ aether })}
+                />
+              </div>
+            </div>
+            <div className="relative">
+              {skin === "rack" ? (
+                <img
+                  className="crazy-88"
+                  src="/crazy-88.jpg"
+                  alt=""
+                  width={220}
+                  height={220}
+                  draggable={false}
+                />
+              ) : (
+                <TrimDeck
+                  analyser={analyser}
+                  armed={armed}
+                  mode={trim}
+                  onMode={(next) => {
+                    setTrim(next);
+                    if (isLiveHost()) {
+                      pushFace({ trim: next });
+                      return;
+                    }
+                    try {
+                      localStorage.setItem(TRIM_KEY, next);
+                    } catch {
+                      /* private */
+                    }
+                  }}
+                />
+              )}
+              <Piano
+                startMidi={startMidi}
+                count={KEY_SPAN}
+                activeNotes={activeNotes}
+                onNoteOn={(m, v) => void noteOn(m, v)}
+                onNoteOff={noteOff}
+                showComputerKeys
+              />
+            </div>
+          </div>
+      </section>
+    </main>
+  );
+}
+
+function HauntSpider() {
+  return (
+    <svg className="haunt-spider" viewBox="0 0 64 64" aria-hidden>
+      <circle cx="32" cy="18" r="6.2" fill="currentColor" />
+      <ellipse cx="32" cy="36" rx="7.4" ry="13.2" fill="currentColor" />
+      <path
+        d="M26 16 L14 6 L6 2 M24 24 L10 18 L2 14 M24 40 L10 48 L2 54 M26 48 L14 58 L6 63 M38 16 L50 6 L58 2 M40 24 L54 18 L62 14 M40 40 L54 48 L62 54 M38 48 L50 58 L58 63"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3.1"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}

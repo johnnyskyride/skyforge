@@ -123,6 +123,8 @@ type Voice = {
   driftGains: GainNode[];
   ghost?: OscillatorNode;
   ghostGain?: GainNode;
+  sub?: OscillatorNode;
+  subGain?: GainNode;
   filter: BiquadFilterNode;
   amp: GainNode;
   releasing: boolean;
@@ -199,6 +201,17 @@ export class SynthEngine {
   private readonly haunt2Lp: BiquadFilterNode;
   private readonly flutter2: OscillatorNode;
   private readonly flutter2Gain: GainNode;
+  private readonly rootOut: GainNode;
+  private readonly rootDry: GainNode;
+  private readonly rootWet: GainNode;
+  private readonly rootBody: BiquadFilterNode;
+  private readonly rootWood: BiquadFilterNode;
+  private readonly rootBoard: BiquadFilterNode;
+  private readonly rootHp: BiquadFilterNode;
+  private readonly rootCave: DelayNode;
+  private readonly rootCaveLp: BiquadFilterNode;
+  private readonly rootCaveAmt: GainNode;
+  private kind: "EARTH" | "WATER" | "FIRE" | "WIND" | null = null;
   private readonly aetherIn: GainNode;
   private readonly aetherDry: GainNode;
   private readonly aetherWet: GainNode;
@@ -386,7 +399,56 @@ export class SynthEngine {
     this.clipper.oversample = "2x";
     this.clipper.curve = this.makeClipCurve() as unknown as Float32Array<ArrayBuffer>;
 
-    this.master.connect(this.waterSend);
+    this.rootHp = this.ctx.createBiquadFilter();
+    this.rootHp.type = "highpass";
+    this.rootHp.frequency.value = 28;
+    this.rootHp.Q.value = 0.55;
+    this.rootBody = this.ctx.createBiquadFilter();
+    this.rootBody.type = "peaking";
+    this.rootBody.frequency.value = 92;
+    this.rootBody.Q.value = 1.05;
+    this.rootBody.gain.value = 4.4;
+    this.rootWood = this.ctx.createBiquadFilter();
+    this.rootWood.type = "peaking";
+    this.rootWood.frequency.value = 218;
+    this.rootWood.Q.value = 0.82;
+    this.rootWood.gain.value = 3.3;
+    this.rootBoard = this.ctx.createBiquadFilter();
+    this.rootBoard.type = "peaking";
+    this.rootBoard.frequency.value = 465;
+    this.rootBoard.Q.value = 0.7;
+    this.rootBoard.gain.value = 2.2;
+    const rootSat = this.ctx.createWaveShaper();
+    rootSat.curve = this.makeClipCurve() as unknown as Float32Array<ArrayBuffer>;
+    rootSat.oversample = "2x";
+    this.rootDry = this.ctx.createGain();
+    this.rootDry.gain.value = 1;
+    this.rootWet = this.ctx.createGain();
+    this.rootWet.gain.value = 0;
+    this.rootOut = this.ctx.createGain();
+    this.rootCave = this.ctx.createDelay(0.08);
+    this.rootCave.delayTime.value = 0.024;
+    this.rootCaveLp = this.ctx.createBiquadFilter();
+    this.rootCaveLp.type = "lowpass";
+    this.rootCaveLp.frequency.value = 1180;
+    this.rootCaveAmt = this.ctx.createGain();
+    this.rootCaveAmt.gain.value = 0;
+
+    this.master.connect(this.rootHp);
+    this.rootHp.connect(this.rootDry);
+    this.rootDry.connect(this.rootOut);
+    this.rootHp.connect(this.rootBody);
+    this.rootBody.connect(this.rootWood);
+    this.rootWood.connect(this.rootBoard);
+    this.rootBoard.connect(rootSat);
+    rootSat.connect(this.rootWet);
+    this.rootWet.connect(this.rootOut);
+    rootSat.connect(this.rootCave);
+    this.rootCave.connect(this.rootCaveLp);
+    this.rootCaveLp.connect(this.rootCaveAmt);
+    this.rootCaveAmt.connect(this.rootOut);
+
+    this.rootOut.connect(this.waterSend);
     this.waterSend.connect(this.bodyLp);
     this.bodyLp.connect(this.sprayHp);
     this.sprayHp.connect(this.airShelf);
@@ -412,10 +474,10 @@ export class SynthEngine {
     this.tideD.connect(this.waterDelay4Mod);
     this.waterDelay4Mod.connect(this.waterDelay4.delayTime);
 
-    this.master.connect(this.dry);
+    this.rootOut.connect(this.dry);
     this.dry.connect(this.aetherIn);
 
-    this.master.connect(this.hauntSend);
+    this.rootOut.connect(this.hauntSend);
     this.hauntSend.connect(this.delay);
     this.delay.connect(this.delayLp);
     this.delayLp.connect(this.delayFb);
@@ -426,7 +488,7 @@ export class SynthEngine {
     this.haunt2Lp.connect(this.hauntMix);
     this.flutter2Gain.connect(this.haunt2.delayTime);
 
-    this.master.connect(this.ringGain);
+    this.rootOut.connect(this.ringGain);
     this.ringGain.connect(this.hauntMix);
     this.whisperGain.connect(this.hauntMix);
     this.waterMix.connect(this.hauntMix);
@@ -513,6 +575,18 @@ export class SynthEngine {
     }
   }
 
+  setKind(kind: "EARTH" | "WATER" | "FIRE" | "WIND" | null) {
+    this.kind = kind;
+    const now = this.ctx.currentTime;
+    const on = kind === "EARTH" ? 1 : 0;
+    this.rootDry.gain.setTargetAtTime(1 - on, now, 0.05);
+    this.rootWet.gain.setTargetAtTime(on, now, 0.05);
+    this.rootCaveAmt.gain.setTargetAtTime(on * 0.22, now, 0.05);
+    for (const voice of this.voices.values()) {
+      voice.subGain?.gain.setTargetAtTime(on * 0.24, now, 0.04);
+    }
+  }
+
   noteOn(midi: number, velocity = 0.85) {
     const now = this.ctx.currentTime;
     const existing = this.voices.get(midi);
@@ -560,7 +634,7 @@ export class SynthEngine {
     amp.connect(this.master);
 
     const vel = Math.max(0.05, Math.min(1, velocity));
-    const peak = (vel * 0.72) / Math.sqrt(count);
+    const peak = (vel * (this.kind === "EARTH" ? 0.82 : 0.72)) / Math.sqrt(count);
     const a = Math.max(0.001, this.params.attack);
     const d = Math.max(0.008, this.params.decay);
     const s = Math.max(0.0001, peak * this.params.sustain);
@@ -592,6 +666,9 @@ export class SynthEngine {
       const ghost = this.startGhost(freq, filter, h);
       voice.ghost = ghost.osc;
       voice.ghostGain = ghost.gain;
+      const sub = this.startSub(freq, filter);
+      voice.sub = sub.osc;
+      voice.subGain = sub.gain;
     }
     this.voices.set(midi, voice);
     this.midiLog.push({ t: now, type: "on", midi, vel });
@@ -923,6 +1000,18 @@ export class SynthEngine {
     return { osc, gain };
   }
 
+  private startSub(freq: number, dest: AudioNode): { osc: OscillatorNode; gain: GainNode } {
+    const osc = this.ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.value = freq * 0.5;
+    const gain = this.ctx.createGain();
+    gain.gain.value = this.kind === "EARTH" ? 0.24 : 0;
+    osc.connect(gain);
+    gain.connect(dest);
+    osc.start();
+    return { osc, gain };
+  }
+
   private stealOldest(now: number) {
     let oldest: Voice | undefined;
     for (const v of this.voices.values()) {
@@ -942,6 +1031,7 @@ export class SynthEngine {
       voice.drift?.stop(now + 0.03);
       for (const d of voice.drifts) d.stop(now + 0.03);
       voice.ghost?.stop(now + 0.03);
+      voice.sub?.stop(now + 0.03);
     } catch {
       /* already stopped */
     }
@@ -957,6 +1047,8 @@ export class SynthEngine {
         for (const g of voice.driftGains) g.disconnect();
         voice.ghost?.disconnect();
         voice.ghostGain?.disconnect();
+        voice.sub?.disconnect();
+        voice.subGain?.disconnect();
       } catch {
         /* noop */
       }

@@ -13,6 +13,7 @@ const MAX_VOICES: usize = 8;
 const HAUNT_SECS: f32 = 0.92;
 const WATER_SECS: f32 = 0.08;
 const WATER_ROOM_SECS: f32 = 0.24;
+const CAVE_SECS: f32 = 0.05;
 
 #[derive(Enum, PartialEq, Clone, Copy)]
 pub(crate) enum WaveKind {
@@ -287,15 +288,15 @@ fn kind_shape(kind: Kind) -> Option<Shape> {
         Kind::Earth => Shape {
             wave: WaveKind::Triangle,
             filter: FilterKind::Lowpass,
-            cutoff: 1180.0,
-            reso: 0.85,
-            attack: 0.07,
-            decay: 0.38,
-            sustain: 0.9,
-            release: 0.85,
+            cutoff: 1760.0,
+            reso: 1.08,
+            attack: 0.028,
+            decay: 0.32,
+            sustain: 0.92,
+            release: 0.7,
             octave: -1,
-            unison: 2,
-            waters: 0.08,
+            unison: 3,
+            waters: 0.1,
             halloween: 0.0,
             aether: 0.0,
         },
@@ -590,6 +591,7 @@ struct Voice {
     phase: [f32; 3],
     ghost_phase: f32,
     ghost_b: f32,
+    sub_phase: f32,
     env: f32,
     stage: EnvStage,
     age: u64,
@@ -605,6 +607,7 @@ impl Voice {
             phase: [0.0; 3],
             ghost_phase: 0.0,
             ghost_b: 0.0,
+            sub_phase: 0.0,
             env: 0.0,
             stage: EnvStage::Off,
             age: 0,
@@ -699,9 +702,16 @@ struct SkyForge {
     water3: DelayLine,
     water4: DelayLine,
     water_room: DelayLine,
+    cave1: DelayLine,
+    cave2: DelayLine,
     water_lp: Biquad,
     water_peak: Biquad,
     water_air: Biquad,
+    root_body: Biquad,
+    root_wood: Biquad,
+    root_board: Biquad,
+    root_hp: Biquad,
+    cave_lp: Biquad,
     delay_lp: Biquad,
     delay_lp2: Biquad,
     whisper_bp: Biquad,
@@ -737,9 +747,16 @@ impl Default for SkyForge {
             water3: DelayLine::new(64),
             water4: DelayLine::new(64),
             water_room: DelayLine::new(64),
+            cave1: DelayLine::new(64),
+            cave2: DelayLine::new(64),
             water_lp: Biquad::silent(),
             water_peak: Biquad::silent(),
             water_air: Biquad::silent(),
+            root_body: Biquad::silent(),
+            root_wood: Biquad::silent(),
+            root_board: Biquad::silent(),
+            root_hp: Biquad::silent(),
+            cave_lp: Biquad::silent(),
             delay_lp: Biquad::silent(),
             delay_lp2: Biquad::silent(),
             whisper_bp: Biquad::silent(),
@@ -787,6 +804,7 @@ impl SkyForge {
         v.phase = [0.0; 3];
         v.ghost_phase = 0.0;
         v.ghost_b = 0.0;
+        v.sub_phase = 0.0;
         v.env = 0.0001;
         v.stage = EnvStage::Attack;
         v.age = self.age;
@@ -833,6 +851,8 @@ impl SkyForge {
         self.water3.clear();
         self.water4.clear();
         self.water_room.clear();
+        self.cave1.clear();
+        self.cave2.clear();
         self.aether_l = Aether::new();
         self.aether_r = Aether::new();
         self.limit_l.env = 0.0;
@@ -847,6 +867,8 @@ impl SkyForge {
         self.water3.resize((WATER_SECS * sr) as usize + 16);
         self.water4.resize((WATER_SECS * sr) as usize + 16);
         self.water_room.resize((WATER_ROOM_SECS * sr) as usize + 16);
+        self.cave1.resize((CAVE_SECS * sr) as usize + 16);
+        self.cave2.resize((CAVE_SECS * sr) as usize + 16);
     }
 }
 
@@ -971,6 +993,13 @@ impl Plugin for SkyForge {
             rec_local.reserve(len);
         }
         self.bus.clip_sr.store(sr as u32, Ordering::Relaxed);
+        let earth = matches!(self.params.kind.value(), Kind::Earth)
+            || self
+                .params
+                .face
+                .lock()
+                .map(|f| f.kind.eq_ignore_ascii_case("EARTH"))
+                .unwrap_or(false);
         for i in 0..len {
             while let Some(event) = next_event {
                 if event.timing() as usize > i {
@@ -1104,6 +1133,15 @@ impl Plugin for SkyForge {
                 }
                 osc_sum *= uni_scale;
 
+                if earth && !matches!(wave, WaveKind::Noise) {
+                    let sdt = (hz * 0.5 / sr).clamp(0.00001, 0.49);
+                    osc_sum += (v.sub_phase * std::f32::consts::TAU).sin() * 0.24;
+                    v.sub_phase += sdt;
+                    if v.sub_phase >= 1.0 {
+                        v.sub_phase -= 1.0;
+                    }
+                }
+
                 if h > 0.015 && !matches!(wave, WaveKind::Noise) {
                     let gdt = (hz / sr).clamp(0.00001, 0.49) * 1.0064;
                     osc_sum += osc(wave, v.ghost_phase, gdt, pw, &mut self.noise) * h * 0.16;
@@ -1125,11 +1163,24 @@ impl Plugin for SkyForge {
                 let q = (reso * (1.0 + h * 0.16) * edge).clamp(0.1, 18.0);
                 v.filter.set_svf(fkind, fcut, q, sr);
                 let filtered = v.filter.tick(osc_sum);
-                mix += filtered * v.env * v.vel * 0.4;
+                let hit = if earth { 0.48 } else { 0.4 };
+                mix += filtered * v.env * v.vel * hit;
             }
 
             if !mix.is_finite() {
                 mix = 0.0;
+            }
+
+            if earth {
+                self.root_body.set_peaking(92.0, 1.05, 4.4, sr);
+                self.root_wood.set_peaking(218.0, 0.82, 3.3, sr);
+                self.root_board.set_peaking(465.0, 0.7, 2.2, sr);
+                self.root_hp.set_svf(FilterKind::Highpass, 28.0, 0.55, sr);
+                mix = self.root_hp.tick(
+                    self.root_board
+                        .tick(self.root_wood.tick(self.root_body.tick(mix))),
+                );
+                mix = softsat(mix + 0.05, 1.3);
             }
 
             let makeup = 1.0 / (1.0 + h * 0.12 + t * 0.10 + a * 0.08);
@@ -1210,8 +1261,19 @@ impl Plugin for SkyForge {
             let water_l = (chorus_l * 0.36 + room_l * 0.44) * t;
             let water_r = (chorus_r * 0.36 + room_r * 0.44) * t;
 
-            let bus_l = dry + haunt_l + water_l;
-            let bus_r = dry + haunt_r + water_r;
+            let mut earth_l = 0.0;
+            let mut earth_r = 0.0;
+            if earth {
+                self.cave_lp.set_svf(FilterKind::Lowpass, 1180.0, 0.62, sr);
+                let stone = self.cave_lp.tick(after_vol);
+                self.cave1.write(stone);
+                self.cave2.write(stone);
+                earth_l = self.cave1.read((0.024 * sr).max(2.0)) * 0.22;
+                earth_r = self.cave2.read((0.033 * sr).max(2.0)) * 0.22;
+            }
+
+            let bus_l = dry + haunt_l + water_l + earth_l;
+            let bus_r = dry + haunt_r + water_r + earth_r;
             let crushed_l = self.aether_l.tick(bus_l, a, sr, &mut self.noise);
             let crushed_r = self.aether_r.tick(bus_r, a, sr, &mut self.noise);
             let out_l = self.limit_l.tick(crushed_l, sr).clamp(-1.0, 1.0);

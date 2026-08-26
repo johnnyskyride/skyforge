@@ -59,7 +59,7 @@ jobs:
 
             **This is the real SkyForge face in Live** — same chassis as the HTML file and the desktop app, **Forge and Rack skins**, Trim lining, Kind, Call, keys, Halloween / Waters / Aether.
 
-            **Waters / Halloween / Aether** are a new analog chain. Waters is a four-voice tidal chorus with a small room, not a muddy two-tap. Halloween is a dark stereo plate with tape wow (no cheap fifth). Aether is analog haze — dithered tape, not an 8-bit crush. Kind = Water / Fire / Wind sit on those tunings.
+            **Waters / Halloween / Aether** are a new analog chain. Waters is a four-voice tidal chorus with a small room, not a muddy two-tap. Halloween is a dark stereo plate with tape wow (no cheap fifth). Aether is analog haze — dithered tape, not an 8-bit crush. **Earth** has its own body now: sub weight, wood resonance, a short stone cave. Kind = Water / Fire / Wind / Earth sit on those tunings.
 
             The plugin window is the chassis. No extra pad, no rounded outer frame — Live's own title strip is the only chrome Ableton draws. The window hugs the piano on Forge and Rack. Trim is a tube in the bezel (Purple / Green / Plasma), not a glow behind the panel.
 
@@ -90,7 +90,7 @@ jobs:
 
             Hide or fold the window — knobs, Kind, Rack, trim, handle, size, your presets, and the last three Ear Wyrms stay. Open it again and the face comes back as you left it. The Wyrms strip keeps three takes; a new cut does not wipe the last two.
 
-            Replace any older SkyForge VST (vst3-25 and earlier) with this one, then rescan. Remove the old device from the track and add the new one.
+            Replace any older SkyForge VST (vst3-27 and earlier) with this one, then rescan. Remove the old device from the track and add the new one.
 
             Kind = Free uses the knobs. Earth / Water / Fire / Wind load that dragon character (Volume / Halloween / Aether still layer on top).
 
