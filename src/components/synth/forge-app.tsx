@@ -804,6 +804,32 @@ export function ForgeApp() {
     }
   };
 
+  const saveClipAudio = (kind: "wav" | "mp3") => {
+    const take = clipSave;
+    if (!take?.samples?.length) return;
+    try {
+      if (kind === "wav") {
+        if (isLiveHost()) {
+          sendToPlugin({ type: "SaveWav", stem: take.stem });
+          setSavedMsg("Saved · WAV");
+          return;
+        }
+        downloadBlob(encodeWav(take.samples, take.sampleRate), `${take.stem}.wav`);
+        setSavedMsg("Saved · WAV");
+        return;
+      }
+      const blob = encodeMp3(take.samples, take.sampleRate);
+      if (blob.size < 64) throw new Error("empty mp3");
+      if (isLiveHost()) void saveToPlugin(`${take.stem}.mp3`, blob);
+      else downloadBlob(blob, `${take.stem}.mp3`);
+      setSavedMsg("Saved · MP3");
+    } catch {
+      if (isLiveHost()) sendToPlugin({ type: "SaveWav", stem: take.stem });
+      else downloadBlob(encodeWav(take.samples, take.sampleRate), `${take.stem}.wav`);
+      setSavedMsg("MP3 failed · WAV instead");
+    }
+  };
+
   const noteLabel = useMemo(() => {
     if (activeNotes.length === 0) return "—";
     return [...activeNotes].sort((a, b) => a - b).map(midiToName).join("  ");
@@ -975,7 +1001,10 @@ export function ForgeApp() {
               element={clipSave.element}
               url={clipSave.url}
               thumb={clipSave.thumb}
+              canAudio={!!clipSave.samples && clipSave.samples.length > 0}
               onClose={() => setClipSave(null)}
+              onWav={() => saveClipAudio("wav")}
+              onMp3={() => saveClipAudio("mp3")}
             />
           ) : null}
           {clipSave?.fromHistory ? (
@@ -995,23 +1024,8 @@ export function ForgeApp() {
                   "noopener,noreferrer",
                 );
               }}
-              onWav={() => {
-                if (isLiveHost()) {
-                  sendToPlugin({ type: "SaveWav", stem: clipSave.stem });
-                  return;
-                }
-                if (!clipSave.samples) return;
-                downloadBlob(encodeWav(clipSave.samples, clipSave.sampleRate), `${clipSave.stem}.wav`);
-              }}
-              onMp3={() => {
-                if (!clipSave.samples) return;
-                const blob = encodeMp3(clipSave.samples, clipSave.sampleRate);
-                if (isLiveHost()) {
-                  void saveToPlugin(`${clipSave.stem}.mp3`, blob);
-                  return;
-                }
-                downloadBlob(blob, `${clipSave.stem}.mp3`);
-              }}
+              onWav={() => saveClipAudio("wav")}
+              onMp3={() => saveClipAudio("mp3")}
             />
           ) : null}
           <div className="wyrm-bar">
