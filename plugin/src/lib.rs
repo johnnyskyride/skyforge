@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 
 mod editor;
 mod files;
+mod midi_out;
 
 const MAX_VOICES: usize = 8;
 const HAUNT_SECS: f32 = 0.55;
@@ -231,6 +232,8 @@ pub(crate) struct FaceBus {
     pub last_pcm: Mutex<Option<(u32, Vec<i16>)>>,
     pub save: Mutex<Option<(String, Vec<u8>)>>,
     pub wyrms: Mutex<Vec<KeptWyrm>>,
+    pub midi_out: midi_out::SkyMidi,
+    pub midi_flush: AtomicBool,
 }
 
 impl FaceBus {
@@ -253,6 +256,8 @@ impl FaceBus {
             last_pcm: Mutex::new(None),
             save: Mutex::new(None),
             wyrms: Mutex::new(Vec::with_capacity(3)),
+            midi_out: midi_out::SkyMidi::new(),
+            midi_flush: AtomicBool::new(false),
         })
     }
 }
@@ -646,6 +651,7 @@ struct SkyForge {
     ring_phase: f32,
     tide_a: f32,
     tide_b: f32,
+    was_recording: bool,
 }
 
 impl Default for SkyForge {
@@ -674,6 +680,7 @@ impl Default for SkyForge {
             ring_phase: 0.0,
             tide_a: 0.0,
             tide_b: 0.0,
+            was_recording: false,
         }
     }
 }
@@ -704,6 +711,12 @@ impl SkyForge {
         v.filter = Biquad::silent();
         self.age += 1;
         self.tap_midi(note, true, vel);
+    }
+
+    fn note_held(&self, note: u8) -> bool {
+        self.voices.iter().any(|v| {
+            v.active && v.note == note && !matches!(v.stage, EnvStage::Release | EnvStage::Off)
+        })
     }
 
     fn note_off(&mut self, note: u8) {
@@ -785,6 +798,7 @@ impl Plugin for SkyForge {
     ) -> bool {
         self.sr = buffer_config.sample_rate;
         self.alloc_delays(self.sr);
+        self.bus.midi_out.ensure();
         if let (Ok(saved), Ok(mut live)) = (self.params.wyrms.lock(), self.bus.wyrms.lock()) {
             if live.is_empty() && !saved.is_empty() {
                 *live = saved.clone();
@@ -824,12 +838,16 @@ impl Plugin for SkyForge {
             .lock()
             .map(|mut q| q.drain(..).collect())
             .unwrap_or_default();
+        let mut gui_on = [false; 128];
         for (note, on, vel) in incoming {
             if on {
+                if (note as usize) < 128 {
+                    gui_on[note as usize] = true;
+                }
                 self.note_on(note, vel);
                 context.send_event(NoteEvent::NoteOn {
                     timing: 0,
-                    voice_id: None,
+                    voice_id: Some(note as i32),
                     channel: 0,
                     note,
                     velocity: vel.clamp(0.0, 1.0),
@@ -838,13 +856,25 @@ impl Plugin for SkyForge {
                 self.note_off(note);
                 context.send_event(NoteEvent::NoteOff {
                     timing: 0,
-                    voice_id: None,
+                    voice_id: Some(note as i32),
                     channel: 0,
                     note,
                     velocity: 0.0,
                 });
             }
         }
+
+        let rec_now = context.transport().recording;
+        if rec_now && !self.was_recording {
+            if let Ok(mut log) = self.bus.midi.lock() {
+                log.clear();
+            }
+            self.bus.midi_t.store(0, Ordering::Relaxed);
+        }
+        if !rec_now && self.was_recording {
+            self.bus.midi_flush.store(true, Ordering::Relaxed);
+        }
+        self.was_recording = rec_now;
 
         let mut peak = 0.0f32;
         let rec = self.bus.clip_on.load(Ordering::Relaxed);
@@ -860,36 +890,26 @@ impl Plugin for SkyForge {
                 }
                 match event {
                     NoteEvent::NoteOn {
-                        timing,
-                        voice_id,
-                        channel,
+                        timing: _,
+                        voice_id: _,
+                        channel: _,
                         note,
                         velocity,
                     } => {
-                        self.note_on(note, velocity);
-                        context.send_event(NoteEvent::NoteOn {
-                            timing,
-                            voice_id,
-                            channel,
-                            note,
-                            velocity,
-                        });
+                        if !(note < 128 && gui_on[note as usize]) && !self.note_held(note) {
+                            self.note_on(note, velocity);
+                        }
                     }
                     NoteEvent::NoteOff {
-                        timing,
-                        voice_id,
-                        channel,
+                        timing: _,
+                        voice_id: _,
+                        channel: _,
                         note,
-                        velocity,
+                        velocity: _,
                     } => {
-                        self.note_off(note);
-                        context.send_event(NoteEvent::NoteOff {
-                            timing,
-                            voice_id,
-                            channel,
-                            note,
-                            velocity,
-                        });
+                        if !(note < 128 && gui_on[note as usize]) {
+                            self.note_off(note);
+                        }
                     }
                     NoteEvent::Choke { .. } => self.panic(),
                     _ => (),

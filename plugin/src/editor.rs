@@ -667,6 +667,7 @@ pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<crate::FaceBus>) -> Op
                 match serde_json::from_value::<Action>(value) {
                     Ok(Action::Init) => {
                         ready.store(true, Ordering::Relaxed);
+                        bus.midi_out.ensure();
                         load_wyrms(&params, &bus);
                         push_state(ctx, &params, &bus, true);
                         let scale = params
@@ -693,11 +694,14 @@ pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<crate::FaceBus>) -> Op
                         ctx.resize(window, w, h);
                     }
                     Ok(Action::NoteOn { note, vel }) => {
+                        let vel = vel.unwrap_or(0.9);
+                        bus.midi_out.send(note, true, vel);
                         if let Ok(mut q) = bus.inbox.lock() {
-                            q.push((note, true, vel.unwrap_or(0.9)));
+                            q.push((note, true, vel));
                         }
                     }
                     Ok(Action::NoteOff { note }) => {
+                        bus.midi_out.send(note, false, 0.0);
                         if let Ok(mut q) = bus.inbox.lock() {
                             q.push((note, false, 0.0));
                         }
@@ -754,6 +758,10 @@ pub fn build_editor(params: Arc<SkyForgeParams>, bus: Arc<crate::FaceBus>) -> Op
                 push_state(ctx, &params, &bus, true);
             }
             if pump_clip(ctx, &bus) {
+                return;
+            }
+            if bus.midi_flush.swap(false, Ordering::Relaxed) {
+                pump_midi(ctx, &bus);
                 return;
             }
             if bus.clip_full.swap(false, Ordering::Relaxed) {
