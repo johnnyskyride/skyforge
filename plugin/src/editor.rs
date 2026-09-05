@@ -6,8 +6,8 @@ use serde_json::json;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
-pub const FACE_W: u32 = 1100;
-pub const FACE_H: u32 = 608;
+pub const FACE_W: u32 = 1180;
+pub const FACE_H: u32 = 612;
 const CLIP_CHUNK: usize = 24_576;
 
 #[derive(Deserialize)]
