@@ -925,7 +925,7 @@ export function ForgeApp() {
       thumb: take.thumb,
       handle: formatXHandle(xHandleRef.current),
     }).then((how) => {
-      setSavedMsg(how === "sheet" ? "Share sheet · pick X" : "Opened X · drop the wyrm onto the post");
+      setSavedMsg(how === "sheet" ? "Share sheet · pick X" : "Wyrm downloaded · caption copied · attach the file on X");
     });
   };
 
@@ -971,7 +971,7 @@ export function ForgeApp() {
         sendToPlugin({ type: "FocusLive" });
       }}
     >
-      <h1 className="sr-only">SkyForge analog synthesizer by johnnyskyride</h1>
+      <h1 className="sr-only">SkyForge analog synthesizer by SoSkyride</h1>
       {!armed && !isLiveHost() ? <ArmGate onArm={arm} /> : null}
       <section
         className="forge-chassis relative mx-auto w-full max-w-5xl"
@@ -986,6 +986,7 @@ export function ForgeApp() {
           <span className="chassis-screw bl" aria-hidden />
           <span className="chassis-screw br" aria-hidden />
           <header className="chassis-head flex flex-wrap items-center gap-3 px-4 py-2.5 sm:px-5">
+            <div className="flex shrink-0 items-center gap-3">
             <button
               type="button"
               onPointerDown={(e) => {
@@ -999,21 +1000,19 @@ export function ForgeApp() {
             >
               <Power className="size-4" strokeWidth={1.75} />
             </button>
-            <div className="min-w-0 flex-1">
-              <p className="font-mono text-2xs tracking-[0.18em] text-muted">
-                <span className="uppercase">SF-33</span>
-                <span className="text-subtle"> · </span>
-                <span className="normal-case tracking-wide">@johnnyskyride</span>
-                {savedMsg ? (
-                  <span className="ml-2 tracking-[0.12em] text-led">{savedMsg}</span>
-                ) : midiOn ? (
-                  <span className="ml-2 inline-flex items-center gap-1 tracking-[0.16em] text-led">
-                    <Circle className="size-2 fill-current" />
-                    Port
-                  </span>
-                ) : null}
-              </p>
-            </div>
+            <p className="font-mono text-2xs tracking-[0.18em] text-muted whitespace-nowrap">
+              <span className="uppercase">SF-33</span>
+              <span className="text-subtle"> · </span>
+              <span className="normal-case tracking-wide">SoSkyride</span>
+              {savedMsg ? (
+                <span className="ml-2 tracking-[0.12em] text-led">{savedMsg}</span>
+              ) : midiOn ? (
+                <span className="ml-2 inline-flex items-center gap-1 tracking-[0.16em] text-led">
+                  <Circle className="size-2 fill-current" />
+                  Port
+                </span>
+              ) : null}
+            </p>
             <div className="keys-midi" role="group" aria-label="Computer keyboard">
               <button
                 type="button"
@@ -1031,6 +1030,7 @@ export function ForgeApp() {
               >
                 MIDI
               </button>
+            </div>
             </div>
             <OptionsMenu
               scale={scale}

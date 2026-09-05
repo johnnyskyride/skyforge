@@ -906,8 +906,8 @@ impl SkyForge {
 
 impl Plugin for SkyForge {
     const NAME: &'static str = "SkyForge";
-    const VENDOR: &'static str = "johnnyskyride";
-    const URL: &'static str = "https://github.com/johnnyskyride/skyforge";
+    const VENDOR: &'static str = "SoSkyride";
+    const URL: &'static str = "https://johnnyskyride.itch.io/skyforge";
     const EMAIL: &'static str = "johnnyskyride@users.noreply.github.com";
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
@@ -1379,7 +1379,7 @@ impl Plugin for SkyForge {
 
 impl ClapPlugin for SkyForge {
     const CLAP_ID: &'static str = "com.johnnyskyride.skyforge";
-    const CLAP_DESCRIPTION: Option<&'static str> = Some("Analog instrument by @johnnyskyride");
+    const CLAP_DESCRIPTION: Option<&'static str> = Some("Analog instrument by SoSkyride");
     const CLAP_MANUAL_URL: Option<&'static str> = Some(Self::URL);
     const CLAP_SUPPORT_URL: Option<&'static str> = Some(Self::URL);
     const CLAP_FEATURES: &'static [ClapFeature] = &[

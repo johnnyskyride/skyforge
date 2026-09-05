@@ -36,6 +36,25 @@ export function openInBrowser(url: string) {
   a.remove();
 }
 
+function isWindowsHost(): boolean {
+  return typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
+}
+
+function downloadFile(file: File) {
+  const url = URL.createObjectURL(file);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = file.name;
+  a.rel = "noopener";
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  window.setTimeout(() => {
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, 2500);
+}
+
 async function fileFromUrl(url: string, name: string): Promise<File | null> {
   if (!url) return null;
   try {
@@ -65,7 +84,8 @@ export async function shareWyrmOnX(s: ShareWyrm): Promise<ShareResult> {
     return "sheet";
   }
 
-  if (file && typeof navigator.canShare === "function") {
+  // Windows Web Share shows a Copy sheet but never puts a blob video on the clipboard.
+  if (file && !isWindowsHost() && typeof navigator.canShare === "function") {
     try {
       if (navigator.canShare({ files: [file] })) {
         await navigator.share({
@@ -80,26 +100,12 @@ export async function shareWyrmOnX(s: ShareWyrm): Promise<ShareResult> {
     }
   }
 
+  if (file) downloadFile(file);
+
   try {
     await navigator.clipboard.writeText(text);
   } catch {
-    /* webview clipboard may be locked */
-  }
-
-  if (s.thumb && navigator.clipboard && "write" in navigator.clipboard) {
-    try {
-      const img = await fetch(s.thumb).then((r) => r.blob());
-      if (img.type.startsWith("image/")) {
-        await navigator.clipboard.write([
-          new ClipboardItem({
-            [img.type]: img,
-            "text/plain": new Blob([text], { type: "text/plain" }),
-          }),
-        ]);
-      }
-    } catch {
-      /* image paste is extra */
-    }
+    /* clipboard may be locked in an iframe */
   }
 
   openInBrowser(intentUrl(text));

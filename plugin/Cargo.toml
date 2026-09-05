@@ -1,8 +1,8 @@
 [package]
 name = "skyforge_vst"
-version = "2.11.0"
+version = "2.12.0"
 edition = "2021"
-authors = ["johnnyskyride"]
+authors = ["SoSkyride"]
 description = "SkyForge analog instrument — VST3 / CLAP"
 license = "MIT"
 

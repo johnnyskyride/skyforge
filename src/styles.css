@@ -196,3 +196,14 @@ select optgroup {
   box-shadow: inset 0 2px 4px #0009, 0 0 0 1px #3cff6a;
 }
 
+.trim-deck {
+  left: auto;
+  right: 0.35rem;
+  transform: none;
+}
+.forge-chassis[data-skin="rack"] .crazy-88 {
+  left: auto;
+  right: 0.2rem;
+  transform: rotate(-7deg);
+}
+
